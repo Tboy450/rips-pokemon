@@ -26,8 +26,10 @@ The current implementation is advisor-first. It should not tap purchases automat
 - A sell is only committed after the buyback sheet amount matches the expected card value.
 - A vault is only committed after the user taps Vault in the app.
 - The session tracker stores bank, vault, opened count, pending pack, and history in `data/live_session.json`.
+- Committed live sell/vault events are appended to `data/outcomes.jsonl` by default.
 
 `data/live_session.json` is intentionally ignored by Git because it is device/session-specific.
+`data/outcomes.jsonl` is also ignored and should hold real observed pull data.
 
 ## Current Known Session
 
@@ -89,7 +91,7 @@ Use a screenshot-first workflow:
 
 ```bash
 python -m rips_ai session-screen /path/to/pack.png --pack two_fifty --commit
-python -m rips_ai session-screen /path/to/result.png
+python -m rips_ai session-screen /path/to/result.png --rarity-hint "blue flashes"
 python -m rips_ai session-screen /path/to/buyback.png --commit
 ```
 
@@ -97,9 +99,14 @@ Use manual values when OCR is not available or not trusted:
 
 ```bash
 python -m rips_ai session-buy --pack two_fifty
-python -m rips_ai session-result --card-value 0.30
+python -m rips_ai session-result --card-value 0.30 --rarity-hint "blue flashes"
 python -m rips_ai session-buyback --amount 0.30 --commit
 ```
+
+Use `python -m rips_ai analyze-ledger` to summarize observed card values,
+observed profit, and sell/vault counts by pack.
+Use `python -m rips_ai export-ledger-config --output data/packs.observed.json`
+to convert observed pulls into a simulation config.
 
 Try live Android capture through Shizuku:
 
@@ -132,12 +139,11 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
 
 ## What To Improve Next
 
-1. Replace `config/packs.example.json` with real observed outcome data.
-2. Add a ledger workflow that records every real pack result with pack id, buy price, card value, action, bank before/after, and optional rarity flash notes.
-3. Recalibrate OCR regions if the target device resolution differs from `1080x2340`.
-4. Add collection-screen cross-checks to verify the tracked vault value.
-5. Make `device-capture` plus `session-screen` the standard live loop once Shizuku is stable.
-6. Only after the advisor is reliable, consider guarded tap/swipe assistance for non-purchase gestures.
+1. Collect enough real outcomes in `data/outcomes.jsonl`, then export `data/packs.observed.json`.
+2. Recalibrate OCR regions if the target device resolution differs from `1080x2340`.
+3. Add collection-screen cross-checks to verify the tracked vault value.
+4. Make `device-capture` plus `session-screen` the standard live loop once Shizuku is stable.
+5. Only after the advisor is reliable, consider guarded tap/swipe assistance for non-purchase gestures.
 
 ## Safety Direction
 

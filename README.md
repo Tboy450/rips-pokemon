@@ -50,6 +50,16 @@ Summarize logged outcomes:
 python -m rips_ai analyze-ledger
 ```
 
+The default ledger is `data/outcomes.jsonl`. It is ignored by Git because it
+contains device/session-specific observed pulls.
+
+Build a simulation config from observed outcomes:
+
+```bash
+python -m rips_ai export-ledger-config --output data/packs.observed.json
+python -m rips_ai simulate --config data/packs.observed.json --bank 25 --min-bank 10 --allow-negative-ev
+```
+
 Parse measured screen text and decide whether to sell or vault:
 
 ```bash
@@ -115,8 +125,8 @@ python -m rips_ai session-buy --pack two_fifty
 On the result screen, read the screenshot or enter the card value:
 
 ```bash
-python -m rips_ai session-result --image /path/to/result.png
-python -m rips_ai session-result --card-value 0.30
+python -m rips_ai session-result --image /path/to/result.png --rarity-hint "blue flashes"
+python -m rips_ai session-result --card-value 0.30 --rarity-hint "blue flashes"
 ```
 
 If the advice is `sell`, tap Sell in the app, then verify the buyback sheet:
@@ -125,6 +135,9 @@ If the advice is `sell`, tap Sell in the app, then verify the buyback sheet:
 python -m rips_ai session-buyback --image /path/to/buyback.png
 python -m rips_ai session-buyback --amount 0.30 --commit
 ```
+
+Committed sell/vault outcomes are appended to `data/outcomes.jsonl` by default.
+Use `--ledger /path/to/outcomes.jsonl` to write a different file.
 
 If the advice is `vault`, tap Vault in the app, then commit it:
 

@@ -22,6 +22,12 @@ from .core import (
     run_session,
 )
 from .device import DeviceAccessError, capture_screenshot
+from .ledger import (
+    append_ledger_record,
+    build_observed_pack_config,
+    load_ledger_records,
+    summarize_records_by_pack,
+)
 from .screen import (
     advice_from_observation,
     classify_image,
@@ -44,6 +50,7 @@ from .session import (
 
 DEFAULT_CONFIG = Path("config/packs.example.json")
 DEFAULT_SESSION = Path("data/live_session.json")
+DEFAULT_LEDGER = Path("data/outcomes.jsonl")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -83,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     record = subparsers.add_parser("record", help="append one manual pack result")
     record.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    record.add_argument("--ledger", type=Path, default=Path("data/outcomes.jsonl"))
+    record.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     record.add_argument("--pack", required=True, help="pack id from config")
     record.add_argument("--bank", required=True, help="cash before buying the pack")
     record.add_argument("--vault", default="0.00", help="vault value before the pack")
@@ -92,7 +99,15 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--rarity-hint", help="visible color flash/pattern notes")
 
     analyze = subparsers.add_parser("analyze-ledger", help="summarize logged results")
-    analyze.add_argument("--ledger", type=Path, default=Path("data/outcomes.jsonl"))
+    analyze.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+
+    export_config = subparsers.add_parser(
+        "export-ledger-config",
+        help="write a pack config from observed ledger results",
+    )
+    export_config.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    export_config.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    export_config.add_argument("--output", type=Path, default=Path("data/packs.observed.json"))
 
     advise_text = subparsers.add_parser(
         "advise-text",
@@ -195,6 +210,8 @@ def build_parser() -> argparse.ArgumentParser:
     session_result.add_argument("--regions", type=Path, default=Path("config/screen_regions.example.json"))
     session_result.add_argument("--image", type=Path, help="result screen screenshot")
     session_result.add_argument("--card-value", help="manual revealed card value")
+    session_result.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    session_result.add_argument("--rarity-hint", help="visible color flash/pattern notes")
     session_result.add_argument(
         "--commit-vault",
         action="store_true",
@@ -209,6 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_buyback.add_argument("--regions", type=Path, default=Path("config/screen_regions.example.json"))
     session_buyback.add_argument("--image", type=Path, help="buyback sheet screenshot")
     session_buyback.add_argument("--amount", help="manual buyback amount")
+    session_buyback.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     session_buyback.add_argument(
         "--commit",
         action="store_true",
@@ -220,6 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="commit a pending vault advice after tapping Vault in the app",
     )
     session_vault.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+    session_vault.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
 
     session_screen = subparsers.add_parser(
         "session-screen",
@@ -235,6 +254,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
     )
     session_screen.add_argument("--pack", help="pack id to mark bought on a pack screen")
+    session_screen.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    session_screen.add_argument("--rarity-hint", help="visible color flash/pattern notes")
     session_screen.add_argument(
         "--commit",
         action="store_true",
@@ -351,11 +372,11 @@ def command_record(args: argparse.Namespace) -> int:
     )
     result = apply_round(state, pack, card, strategy)
     record = round_to_record(result, bank_before, vault_before, args.rarity_hint)
-    record["recorded_at"] = datetime.now(timezone.utc).isoformat()
-
-    args.ledger.parent.mkdir(parents=True, exist_ok=True)
-    with args.ledger.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, sort_keys=True) + "\n")
+    append_ledger_record(
+        args.ledger,
+        record,
+        recorded_at=datetime.now(timezone.utc).isoformat(),
+    )
 
     print(f"action: {result.action}")
     print(f"bank after: {cents_to_dollars(result.bank_after_cents)}")
@@ -370,20 +391,43 @@ def command_analyze_ledger(args: argparse.Namespace) -> int:
         print(f"ledger not found: {args.ledger}", file=sys.stderr)
         return 1
 
-    by_pack: dict[str, list[int]] = {}
-    with args.ledger.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            by_pack.setdefault(row["pack_id"], []).append(int(row["card_value_cents"]))
+    records = load_ledger_records(args.ledger)
+    if not records:
+        print(f"ledger is empty: {args.ledger}")
+        return 0
 
-    for pack_id, values in sorted(by_pack.items()):
-        print(pack_id)
-        print(f"  observations: {len(values)}")
-        print(f"  avg card value: {cents_to_dollars(round(statistics.mean(values)))}")
-        print(f"  median card value: {cents_to_dollars(round(statistics.median(values)))}")
-        print(f"  best card: {cents_to_dollars(max(values))}")
+    for summary in summarize_records_by_pack(records):
+        print(summary.pack_id)
+        print(f"  observations: {summary.observations}")
+        print(f"  avg card value: {cents_to_dollars(summary.average_card_value_cents)}")
+        print(f"  median card value: {cents_to_dollars(summary.median_card_value_cents)}")
+        print(f"  best card: {cents_to_dollars(summary.best_card_value_cents)}")
+        print(f"  avg observed profit: {cents_to_dollars(summary.average_observed_profit_cents)}")
+        print(f"  actions: {summary.sell_count} sell, {summary.vault_count} vault")
+    return 0
+
+
+def command_export_ledger_config(args: argparse.Namespace) -> int:
+    if not args.ledger.exists():
+        print(f"ledger not found: {args.ledger}", file=sys.stderr)
+        return 1
+
+    records = load_ledger_records(args.ledger)
+    if not records:
+        print(f"ledger is empty: {args.ledger}", file=sys.stderr)
+        return 1
+
+    try:
+        pack_names = {pack.id: pack.name for pack in load_packs(args.config)}
+        config = build_observed_pack_config(records, pack_names)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"config: {args.output}")
+    print(f"packs: {len(config['packs'])}")
     return 0
 
 
@@ -569,6 +613,11 @@ def _print_session(session: LiveSession) -> None:
             print(f"pending action: {session.pending.advised_action}")
 
 
+def _log_committed_event(ledger: Path, event: dict[str, object]) -> None:
+    append_ledger_record(ledger, event)
+    print(f"logged: {ledger}")
+
+
 def _read_money_from_screen(
     image: Path | None,
     manual_value: str | None,
@@ -684,7 +733,7 @@ def command_session_result(args: argparse.Namespace) -> int:
             print("action: wait")
             print("reason: revealed card value was not measurable")
             return 0
-        action = advise_pending_result(session, card_value)
+        action = advise_pending_result(session, card_value, args.rarity_hint)
     except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -699,6 +748,9 @@ def command_session_result(args: argparse.Namespace) -> int:
             print(f"committed: {event['action']}")
             print(f"bank: {cents_to_dollars(session.bank_cents)}")
             print(f"vault: {cents_to_dollars(session.vault_cents)}")
+            save_live_session(args.session, session)
+            _log_committed_event(args.ledger, event)
+            return 0
         else:
             print("next: tap Vault, then run session-vault")
     else:
@@ -736,6 +788,7 @@ def command_session_buyback(args: argparse.Namespace) -> int:
             print(f"committed: {event['action']}")
             print(f"bank: {cents_to_dollars(session.bank_cents)}")
             save_live_session(args.session, session)
+            _log_committed_event(args.ledger, event)
         else:
             print("next: tap Accept, then rerun this command with --commit")
     except (FileNotFoundError, ValueError) as exc:
@@ -756,6 +809,7 @@ def command_session_vault(args: argparse.Namespace) -> int:
     print(f"committed: {event['action']}")
     print(f"bank: {cents_to_dollars(session.bank_cents)}")
     print(f"vault: {cents_to_dollars(session.vault_cents)}")
+    _log_committed_event(args.ledger, event)
     return 0
 
 
@@ -839,7 +893,7 @@ def _handle_session_result_screen(args: argparse.Namespace, session: LiveSession
         print("reason: revealed card value was not measurable")
         return 0
 
-    action = advise_pending_result(session, card_value)
+    action = advise_pending_result(session, card_value, args.rarity_hint)
     print(f"card: {cents_to_dollars(card_value)}")
     print(f"vault: {cents_to_dollars(session.vault_cents)}")
     print(f"action: {action}")
@@ -849,6 +903,7 @@ def _handle_session_result_screen(args: argparse.Namespace, session: LiveSession
             save_live_session(args.session, session)
             print(f"committed: {event['action']}")
             print(f"vault: {cents_to_dollars(session.vault_cents)}")
+            _log_committed_event(args.ledger, event)
         else:
             save_live_session(args.session, session)
             print("next: tap Vault, then rerun this command with --commit")
@@ -880,6 +935,7 @@ def _handle_session_buyback_screen(args: argparse.Namespace, session: LiveSessio
         save_live_session(args.session, session)
         print(f"committed: {event['action']}")
         print(f"bank: {cents_to_dollars(session.bank_cents)}")
+        _log_committed_event(args.ledger, event)
     else:
         print("next: tap Accept, then rerun this command with --commit")
     return 0
@@ -924,6 +980,7 @@ def main(argv: list[str] | None = None) -> int:
         "recommend": command_recommend,
         "record": command_record,
         "analyze-ledger": command_analyze_ledger,
+        "export-ledger-config": command_export_ledger_config,
         "advise-text": command_advise_text,
         "read-screen": command_read_screen,
         "read-regions": command_read_regions,

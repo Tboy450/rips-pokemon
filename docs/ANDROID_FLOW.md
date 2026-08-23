@@ -74,19 +74,19 @@ Track a real live run from the current app values:
 python -m rips_ai session-start --bank 14 --vault 0 --min-bank 10 --force
 python -m rips_ai session-recommend
 python -m rips_ai session-buy --pack two_fifty
-python -m rips_ai session-result --image analysis_frames/time_020.jpg
-python -m rips_ai session-buyback --image analysis_frames/time_022.jpg
+python -m rips_ai session-result --image analysis_frames/time_020.jpg --rarity-hint "blue flashes"
+python -m rips_ai session-buyback --image analysis_frames/time_022.jpg --commit
 ```
 
 Short screenshot workflow:
 
 ```bash
 python -m rips_ai session-screen analysis_frames/time_001.jpg --pack two_fifty --commit
-python -m rips_ai session-screen analysis_frames/time_020.jpg
-python -m rips_ai session-screen analysis_frames/time_022.jpg
+python -m rips_ai session-screen analysis_frames/time_020.jpg --rarity-hint "blue flashes"
+python -m rips_ai session-screen analysis_frames/time_022.jpg --commit
 ```
 
-`session-buyback` only changes tracked bank when `--commit` is supplied. This keeps the tracker from moving forward before the app action is actually accepted.
+`session-buyback` only changes tracked bank when `--commit` is supplied. This keeps the tracker from moving forward before the app action is actually accepted. Committed outcomes are logged to `data/outcomes.jsonl` by default.
 
 Live capture path:
 

@@ -17,6 +17,7 @@ class PendingPack:
     card_value_cents: int | None = None
     advised_action: Action | None = None
     expected_buyback_cents: int | None = None
+    rarity_hint: str | None = None
 
 
 @dataclass
@@ -85,7 +86,11 @@ def begin_pending_pack(session: LiveSession, pack_id: str, pack_price_cents: int
     session.bank_cents -= pack_price_cents
 
 
-def advise_pending_result(session: LiveSession, card_value_cents: int) -> Action:
+def advise_pending_result(
+    session: LiveSession,
+    card_value_cents: int,
+    rarity_hint: str | None = None,
+) -> Action:
     if session.pending is None:
         raise ValueError("no pending pack; run session-buy first")
 
@@ -93,6 +98,8 @@ def advise_pending_result(session: LiveSession, card_value_cents: int) -> Action
     session.pending.card_value_cents = card_value_cents
     session.pending.advised_action = action
     session.pending.expected_buyback_cents = card_value_cents if action == "sell" else None
+    if rarity_hint is not None:
+        session.pending.rarity_hint = rarity_hint
     return action
 
 
@@ -160,5 +167,6 @@ def _event(
         "bank_after_cents": session.bank_cents,
         "vault_after_cents": session.vault_cents,
         "total_after_cents": session.total_value_cents,
+        "rarity_hint": pending.rarity_hint,
     }
 

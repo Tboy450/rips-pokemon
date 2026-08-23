@@ -18,7 +18,8 @@ class LiveSessionTests(unittest.TestCase):
         session = start_live_session(bank_cents=1400, vault_cents=250, min_bank_cents=1000)
 
         begin_pending_pack(session, "one_dollar", 100)
-        action = advise_pending_result(session, 30)
+        action = advise_pending_result(session, 30, "blue flashes")
+        advise_pending_result(session, 30)
         event = commit_buyback(session, 30)
 
         self.assertEqual(action, "sell")
@@ -26,6 +27,7 @@ class LiveSessionTests(unittest.TestCase):
         self.assertEqual(session.vault_cents, 250)
         self.assertEqual(session.opened_count, 1)
         self.assertEqual(event["action"], "sell")
+        self.assertEqual(event["rarity_hint"], "blue flashes")
 
     def test_buy_then_vault_keeps_post_buy_bank(self):
         session = start_live_session(bank_cents=1400, vault_cents=250, min_bank_cents=1000)
