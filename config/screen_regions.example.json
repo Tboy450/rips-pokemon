@@ -1,0 +1,57 @@
+{
+  "notes": "Calibrated from Screen_Recording_20260817_060907_Rips.mp4 on a 1080x2340 Samsung screen. Fractions are x, y, width, height relative to the source screenshot.",
+  "source": { "width": 1080, "height": 2340 },
+  "regions": {
+    "bank": {
+      "x": 0.667,
+      "y": 0.045,
+      "width": 0.204,
+      "height": 0.038,
+      "psm": 7,
+      "scale": 4
+    },
+    "revealed_card_value": {
+      "x": 0.259,
+      "y": 0.675,
+      "width": 0.481,
+      "height": 0.077,
+      "psm": 7,
+      "scale": 2
+    },
+    "buy_button": {
+      "x": 0.083,
+      "y": 0.778,
+      "width": 0.833,
+      "height": 0.094,
+      "psm": 7,
+      "scale": 2,
+      "whitelist": null
+    },
+    "buyback_offer": {
+      "x": 0.722,
+      "y": 0.513,
+      "width": 0.259,
+      "height": 0.043,
+      "psm": 7,
+      "scale": 3
+    },
+    "sell_button": {
+      "x": 0.046,
+      "y": 0.863,
+      "width": 0.463,
+      "height": 0.073
+    },
+    "vault_button": {
+      "x": 0.491,
+      "y": 0.863,
+      "width": 0.463,
+      "height": 0.073
+    },
+    "buyback_accept_button": {
+      "x": 0.046,
+      "y": 0.823,
+      "width": 0.907,
+      "height": 0.079
+    }
+  }
+}

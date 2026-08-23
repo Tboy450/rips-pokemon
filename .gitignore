@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.codex-project/
+data/
+rips_*copy*.png
+rips_live*.png
+rips_remote*.png

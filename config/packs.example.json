@@ -1,0 +1,34 @@
+{
+  "notes": "Placeholder demo odds only. Replace these outcomes with observed Rips by Triumph results before trusting recommendations.",
+  "packs": [
+    {
+      "id": "one_dollar",
+      "name": "$1 pack",
+      "price_cents": 100,
+      "outcomes": [
+        { "value_cents": 5, "weight": 25, "label": "low value" },
+        { "value_cents": 25, "weight": 35, "label": "low value" },
+        { "value_cents": 75, "weight": 25, "label": "near break-even" },
+        { "value_cents": 150, "weight": 10, "label": "small gain" },
+        { "value_cents": 300, "weight": 4, "label": "good pull" },
+        { "value_cents": 800, "weight": 0.8, "label": "rare pull" },
+        { "value_cents": 3000, "weight": 0.2, "label": "chase pull" }
+      ]
+    },
+    {
+      "id": "two_fifty",
+      "name": "$2.50 pack",
+      "price_cents": 250,
+      "outcomes": [
+        { "value_cents": 25, "weight": 25, "label": "low value" },
+        { "value_cents": 100, "weight": 35, "label": "low value" },
+        { "value_cents": 250, "weight": 25, "label": "break-even" },
+        { "value_cents": 500, "weight": 10, "label": "small gain" },
+        { "value_cents": 1250, "weight": 4, "label": "good pull" },
+        { "value_cents": 5000, "weight": 0.9, "label": "rare pull" },
+        { "value_cents": 15000, "weight": 0.1, "label": "chase pull" }
+      ]
+    }
+  ]
+}
+
