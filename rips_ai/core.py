@@ -279,6 +279,30 @@ def find_pack(packs: Iterable[PackOption], pack_id: str) -> PackOption:
     raise ValueError(f"unknown pack id: {pack_id}")
 
 
+def choose_bankroll_tier_pack(
+    bank_cents: int,
+    min_bank_cents: int,
+    packs: Iterable[PackOption],
+    two_fifty_bank_cents: int,
+    one_dollar_pack_id: str = "one_dollar",
+    two_fifty_pack_id: str = "two_fifty",
+) -> PackOption | None:
+    by_id = {pack.id: pack for pack in packs}
+    two_fifty = by_id.get(two_fifty_pack_id)
+    if (
+        two_fifty is not None
+        and bank_cents >= two_fifty_bank_cents
+        and bank_cents - two_fifty.price_cents >= min_bank_cents
+    ):
+        return two_fifty
+
+    one_dollar = by_id.get(one_dollar_pack_id)
+    if one_dollar is not None and bank_cents - one_dollar.price_cents >= min_bank_cents:
+        return one_dollar
+
+    return None
+
+
 def round_to_record(
     result: RoundResult,
     bank_before_cents: int,

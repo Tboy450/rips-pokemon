@@ -26,6 +26,7 @@ The current implementation is advisor-first. It should not tap purchases automat
   - `sell` if card value is less than or equal to the pack cost.
 - A sell is only committed after the buyback sheet amount matches the expected card value.
 - A vault is only committed after the user taps Vault in the app; it adds the card value to tracked vault total and increments vault card count.
+- Bankroll tiering keeps live recommendations on `$1` packs until bank reaches the `$2.50` unlock threshold, default `$15.00`; if bank drops below that threshold, recommendations fall back to `$1`.
 - The session tracker stores bank, vault, opened count, pending pack, and history in `data/live_session.json`.
 - Committed live sell/vault events are appended to `data/outcomes.jsonl` by default.
 
@@ -93,6 +94,13 @@ Check the `$1` pack with probability-weighted bank/vault projections:
 
 ```bash
 python -m rips_ai session-plan --pack one_dollar
+```
+
+Compare the locked or unlocked `$2.50` tier with its own probability table:
+
+```bash
+python -m rips_ai session-plan --pack two_fifty
+python -m rips_ai session-recommend --two-fifty-bank 15
 ```
 
 Use a screenshot-first workflow:

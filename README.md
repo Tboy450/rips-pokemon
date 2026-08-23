@@ -110,6 +110,16 @@ Check the probability-adjusted `$1` pack plan before opening:
 python -m rips_ai session-plan --pack one_dollar
 ```
 
+The live recommender uses bankroll tiers. By default, it stays on `$1` packs
+until bank reaches `$15.00`; at or above that point it can move to `$2.50`.
+If bank drops below `$15.00`, it falls back to `$1` again:
+
+```bash
+python -m rips_ai session-recommend
+python -m rips_ai session-plan --pack two_fifty
+python -m rips_ai session-recommend --two-fifty-bank 16
+```
+
 Use one screenshot and let the tool classify the current Rips screen:
 
 ```bash

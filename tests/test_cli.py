@@ -10,6 +10,172 @@ from rips_ai.ledger import load_ledger_records
 
 
 class CliSessionLedgerTests(unittest.TestCase):
+    def write_pack_config(self, path: Path) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "packs": [
+                        {
+                            "id": "one_dollar",
+                            "name": "$1 Pack",
+                            "price_cents": 100,
+                            "outcomes": [
+                                {"value_cents": 50, "weight": 9},
+                                {"value_cents": 200, "weight": 1},
+                            ],
+                        },
+                        {
+                            "id": "two_fifty",
+                            "name": "$2.50 Pack",
+                            "price_cents": 250,
+                            "outcomes": [
+                                {"value_cents": 100, "weight": 1},
+                                {"value_cents": 500, "weight": 3},
+                            ],
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_session_recommend_falls_back_to_one_dollar_below_two_fifty_threshold(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "13",
+                            "--vault",
+                            "7.10",
+                            "--vault-count",
+                            "3",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-recommend",
+                            "--session",
+                            str(session),
+                            "--config",
+                            str(config),
+                            "--two-fifty-bank",
+                            "15",
+                        ]
+                    ),
+                    0,
+                )
+
+        text = output.getvalue()
+        self.assertIn("recommendation: open $1 Pack (one_dollar)", text)
+        self.assertIn("tier: $1 fallback until bank reaches $15.00", text)
+
+    def test_session_recommend_unlocks_two_fifty_at_threshold(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "15",
+                            "--vault",
+                            "7.10",
+                            "--vault-count",
+                            "3",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-recommend",
+                            "--session",
+                            str(session),
+                            "--config",
+                            str(config),
+                            "--two-fifty-bank",
+                            "15",
+                        ]
+                    ),
+                    0,
+                )
+
+        text = output.getvalue()
+        self.assertIn("recommendation: open $2.50 Pack (two_fifty)", text)
+        self.assertIn("tier: $2.50 unlocked at $15.00", text)
+        self.assertIn("vault probability: 75.0%", text)
+
+    def test_session_buy_blocks_two_fifty_below_threshold(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "13",
+                            "--vault",
+                            "7.10",
+                            "--vault-count",
+                            "3",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                result = main(
+                    [
+                        "session-buy",
+                        "--session",
+                        str(session),
+                        "--config",
+                        str(config),
+                        "--pack",
+                        "two_fifty",
+                        "--two-fifty-bank",
+                        "15",
+                    ]
+                )
+
+        self.assertEqual(result, 1)
+        self.assertIn("$2.50 pack unlocks at $15.00 bank", stderr.getvalue())
+
     def test_session_plan_reports_weighted_one_dollar_probability(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

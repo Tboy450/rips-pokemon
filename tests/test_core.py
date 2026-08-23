@@ -8,6 +8,7 @@ from rips_ai.core import (
     Outcome,
     PackOption,
     apply_round,
+    choose_bankroll_tier_pack,
     project_pack_open,
     run_session,
 )
@@ -79,6 +80,54 @@ class CoreTests(unittest.TestCase):
         self.assertAlmostEqual(projection.expected_card_value_cents, 162.5)
         self.assertAlmostEqual(projection.expected_bank_after_cents, 1212.5)
         self.assertAlmostEqual(projection.expected_total_delta_cents, 62.5)
+
+    def test_bankroll_tier_switches_between_one_and_two_fifty(self):
+        one = PackOption("one_dollar", "$1 pack", 100, (Outcome(50, 1),))
+        two = PackOption("two_fifty", "$2.50 pack", 250, (Outcome(250, 1),))
+
+        below_threshold = choose_bankroll_tier_pack(
+            bank_cents=1300,
+            min_bank_cents=1000,
+            packs=[one, two],
+            two_fifty_bank_cents=1500,
+        )
+        at_threshold = choose_bankroll_tier_pack(
+            bank_cents=1500,
+            min_bank_cents=1000,
+            packs=[one, two],
+            two_fifty_bank_cents=1500,
+        )
+
+        self.assertEqual(below_threshold, one)
+        self.assertEqual(at_threshold, two)
+
+    def test_two_fifty_projection_uses_its_own_weights(self):
+        one = PackOption(
+            "one_dollar",
+            "$1 pack",
+            100,
+            (
+                Outcome(50, 9),
+                Outcome(200, 1),
+            ),
+        )
+        two = PackOption(
+            "two_fifty",
+            "$2.50 pack",
+            250,
+            (
+                Outcome(100, 1),
+                Outcome(500, 3),
+            ),
+        )
+
+        one_projection = project_pack_open(1500, 710, 1000, one)
+        two_projection = project_pack_open(1500, 710, 1000, two)
+
+        self.assertAlmostEqual(one_projection.vault_probability, 0.1)
+        self.assertAlmostEqual(two_projection.vault_probability, 0.75)
+        self.assertAlmostEqual(one_projection.expected_card_value_cents, 65)
+        self.assertAlmostEqual(two_projection.expected_card_value_cents, 400)
 
 
 if __name__ == "__main__":

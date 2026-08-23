@@ -14,6 +14,7 @@ from .core import (
     GameState,
     apply_round,
     cents_to_dollars,
+    choose_bankroll_tier_pack,
     dollars_to_cents,
     find_pack,
     load_packs,
@@ -51,6 +52,7 @@ from .session import (
 DEFAULT_CONFIG = Path("config/packs.example.json")
 DEFAULT_SESSION = Path("data/live_session.json")
 DEFAULT_LEDGER = Path("data/outcomes.jsonl")
+DEFAULT_TWO_FIFTY_BANK = "15.00"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -190,6 +192,11 @@ def build_parser() -> argparse.ArgumentParser:
     session_recommend.add_argument("--session", type=Path, default=DEFAULT_SESSION)
     session_recommend.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     session_recommend.add_argument(
+        "--two-fifty-bank",
+        default=DEFAULT_TWO_FIFTY_BANK,
+        help="bank threshold that unlocks $2.50 packs",
+    )
+    session_recommend.add_argument(
         "--allow-negative-ev",
         action="store_true",
         help="allow best eligible pack even when observed EV is negative",
@@ -202,6 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
     session_plan.add_argument("--session", type=Path, default=DEFAULT_SESSION)
     session_plan.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     session_plan.add_argument("--pack", default="one_dollar", help="pack id from config")
+    session_plan.add_argument(
+        "--two-fifty-bank",
+        default=DEFAULT_TWO_FIFTY_BANK,
+        help="bank threshold that unlocks $2.50 packs",
+    )
 
     session_buy = subparsers.add_parser(
         "session-buy",
@@ -210,6 +222,11 @@ def build_parser() -> argparse.ArgumentParser:
     session_buy.add_argument("--session", type=Path, default=DEFAULT_SESSION)
     session_buy.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     session_buy.add_argument("--pack", required=True, help="pack id from config")
+    session_buy.add_argument(
+        "--two-fifty-bank",
+        default=DEFAULT_TWO_FIFTY_BANK,
+        help="bank threshold that unlocks $2.50 packs",
+    )
 
     session_result = subparsers.add_parser(
         "session-result",
@@ -263,6 +280,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
     )
     session_screen.add_argument("--pack", help="pack id to mark bought on a pack screen")
+    session_screen.add_argument(
+        "--two-fifty-bank",
+        default=DEFAULT_TWO_FIFTY_BANK,
+        help="bank threshold that unlocks $2.50 packs",
+    )
     session_screen.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     session_screen.add_argument("--rarity-hint", help="visible color flash/pattern notes")
     session_screen.add_argument(
@@ -627,7 +649,24 @@ def _format_probability(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
-def _print_pack_projection(session: LiveSession, pack) -> None:
+def _pack_unlock_reason(
+    session: LiveSession,
+    pack,
+    two_fifty_bank_cents: int,
+) -> str | None:
+    if pack.id == "two_fifty" and session.bank_cents < two_fifty_bank_cents:
+        return (
+            f"$2.50 pack unlocks at {cents_to_dollars(two_fifty_bank_cents)} bank; "
+            f"current bank is {cents_to_dollars(session.bank_cents)}"
+        )
+    return None
+
+
+def _print_pack_projection(
+    session: LiveSession,
+    pack,
+    two_fifty_bank_cents: int | None = None,
+) -> None:
     projection = project_pack_open(
         bank_cents=session.bank_cents,
         vault_cents=session.vault_cents,
@@ -636,6 +675,14 @@ def _print_pack_projection(session: LiveSession, pack) -> None:
     )
     print(f"pack: {projection.pack_name} ({projection.pack_id})")
     print(f"price: {cents_to_dollars(projection.price_cents)}")
+    locked_reason = None
+    if two_fifty_bank_cents is not None:
+        locked_reason = _pack_unlock_reason(session, pack, two_fifty_bank_cents)
+        if locked_reason is not None:
+            print("mode: $1 fallback")
+            print("action: use $1 pack")
+            print(f"reason: {locked_reason}")
+            print("projection if opened anyway:")
     if not projection.can_buy:
         print("action: stop")
         print(
@@ -645,7 +692,8 @@ def _print_pack_projection(session: LiveSession, pack) -> None:
         )
         return
 
-    print("action: open manually if you accept the risk")
+    if locked_reason is None:
+        print("action: open manually if you accept the risk")
     print(f"bank after buy: {cents_to_dollars(projection.bank_after_buy_cents)}")
     print(f"expected card value: {cents_to_dollars(round(projection.expected_card_value_cents))}")
     print(f"expected card profit: {cents_to_dollars(round(projection.expected_card_profit_cents))}")
@@ -732,25 +780,27 @@ def command_session_recommend(args: argparse.Namespace) -> int:
         return 0
 
     packs = load_packs(args.config)
-    strategy = BestExpectedValueStrategy(
-        min_bank_cents=session.min_bank_cents,
-        allowed_pack_ids={"one_dollar", "two_fifty"},
-        play_negative_ev=args.allow_negative_ev,
-    )
-    state = GameState(
+    two_fifty_bank = dollars_to_cents(args.two_fifty_bank)
+    pack = choose_bankroll_tier_pack(
         bank_cents=session.bank_cents,
-        vault_card=CardResult(session.vault_cents, "tracked vault")
-        if session.vault_cents > 0
-        else None,
+        min_bank_cents=session.min_bank_cents,
+        packs=packs,
+        two_fifty_bank_cents=two_fifty_bank,
     )
-    pack = strategy.choose_pack(state, packs)
     if pack is None:
         print("recommendation: stop")
-        print("reason: no eligible pack keeps the bank floor and EV rules intact")
+        print("reason: no eligible pack keeps the bank floor")
         return 0
 
     print(f"recommendation: open {pack.name} ({pack.id})")
-    _print_pack_projection(session, pack)
+    if pack.id == "one_dollar" and session.bank_cents < two_fifty_bank:
+        print(
+            "tier: $1 fallback until bank reaches "
+            f"{cents_to_dollars(two_fifty_bank)}"
+        )
+    elif pack.id == "two_fifty":
+        print(f"tier: $2.50 unlocked at {cents_to_dollars(two_fifty_bank)}")
+    _print_pack_projection(session, pack, two_fifty_bank)
     return 0
 
 
@@ -768,7 +818,7 @@ def command_session_plan(args: argparse.Namespace) -> int:
         _print_session(session)
         return 0
 
-    _print_pack_projection(session, pack)
+    _print_pack_projection(session, pack, dollars_to_cents(args.two_fifty_bank))
     return 0
 
 
@@ -776,7 +826,11 @@ def command_session_buy(args: argparse.Namespace) -> int:
     try:
         session = _load_session(args.session)
         pack = find_pack(load_packs(args.config), args.pack)
-        _print_pack_projection(session, pack)
+        two_fifty_bank = dollars_to_cents(args.two_fifty_bank)
+        locked_reason = _pack_unlock_reason(session, pack, two_fifty_bank)
+        if locked_reason is not None:
+            raise ValueError(locked_reason)
+        _print_pack_projection(session, pack, two_fifty_bank)
         begin_pending_pack(session, pack.id, pack.price_cents)
     except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
@@ -922,16 +976,21 @@ def _handle_session_pack_screen(args: argparse.Namespace, session: LiveSession) 
         return 0
 
     packs = load_packs(args.config)
+    two_fifty_bank = dollars_to_cents(args.two_fifty_bank)
     if args.pack is None:
-        strategy = BestExpectedValueStrategy(
+        pack = choose_bankroll_tier_pack(
+            bank_cents=session.bank_cents,
             min_bank_cents=session.min_bank_cents,
-            allowed_pack_ids={"one_dollar", "two_fifty"},
-            play_negative_ev=True,
+            packs=packs,
+            two_fifty_bank_cents=two_fifty_bank,
         )
-        state = GameState(bank_cents=session.bank_cents)
-        pack = strategy.choose_pack(state, packs)
     else:
         pack = find_pack(packs, args.pack)
+        locked_reason = _pack_unlock_reason(session, pack, two_fifty_bank)
+        if locked_reason is not None:
+            print("action: use $1 pack")
+            print(f"reason: {locked_reason}")
+            return 0
 
     if pack is None:
         print("action: stop")
@@ -946,7 +1005,7 @@ def _handle_session_pack_screen(args: argparse.Namespace, session: LiveSession) 
         return 0
 
     print(f"action: buy {pack.name} ({pack.id})")
-    print(f"bank after buy: {cents_to_dollars(session.bank_cents - pack.price_cents)}")
+    _print_pack_projection(session, pack, two_fifty_bank)
     if args.commit:
         begin_pending_pack(session, pack.id, pack.price_cents)
         save_live_session(args.session, session)

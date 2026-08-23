@@ -62,6 +62,10 @@ Read pack-screen bank and check the bank floor before a buy:
 python -m rips_ai advise-screen analysis_frames/time_001.jpg --state pack --pack-price 1 --min-bank 10
 ```
 
+Use the live recommender for tier choice: it stays on `$1` packs until the
+configured `$2.50` unlock bank, default `$15.00`, then falls back to `$1` if
+bank drops below that threshold.
+
 Read a buyback sheet and accept only if the amount matches:
 
 ```bash
