@@ -79,6 +79,55 @@ class RoundResult:
     total_after_cents: int
 
 
+@dataclass(frozen=True)
+class PackOutcomeProjection:
+    card_value_cents: int
+    weight: float
+    probability: float
+    action: Action
+    bank_after_cents: int
+    vault_after_cents: int
+    total_after_cents: int
+    can_open_same_pack_again: bool
+
+
+@dataclass(frozen=True)
+class PackOpenProjection:
+    pack_id: str
+    pack_name: str
+    price_cents: int
+    bank_before_cents: int
+    vault_before_cents: int
+    min_bank_cents: int
+    can_buy: bool
+    bank_after_buy_cents: int
+    expected_card_value_cents: float
+    expected_bank_after_cents: float
+    expected_total_after_cents: float
+    sell_probability: float
+    vault_probability: float
+    total_profit_probability: float
+    bank_profit_probability: float
+    can_open_same_pack_again_probability: float
+    worst_bank_after_cents: int
+    best_bank_after_cents: int
+    outcomes: tuple[PackOutcomeProjection, ...]
+
+    @property
+    def expected_card_profit_cents(self) -> float:
+        return self.expected_card_value_cents - self.price_cents
+
+    @property
+    def expected_bank_delta_cents(self) -> float:
+        return self.expected_bank_after_cents - self.bank_before_cents
+
+    @property
+    def expected_total_delta_cents(self) -> float:
+        return self.expected_total_after_cents - (
+            self.bank_before_cents + self.vault_before_cents
+        )
+
+
 @dataclass
 class GameState:
     bank_cents: int
@@ -254,3 +303,100 @@ def decide_revealed_card(vault_value_cents: int, card_value_cents: int) -> Actio
     if card_value_cents > vault_value_cents:
         return "vault"
     return "sell"
+
+
+def project_pack_open(
+    bank_cents: int,
+    vault_cents: int,
+    min_bank_cents: int,
+    pack: PackOption,
+) -> PackOpenProjection:
+    total_weight = sum(outcome.weight for outcome in pack.outcomes)
+    if total_weight <= 0:
+        raise ValueError(f"pack {pack.id!r} has no positive outcome weight")
+
+    bank_after_buy = bank_cents - pack.price_cents
+    can_buy = bank_after_buy >= min_bank_cents
+    projected_outcomes: list[PackOutcomeProjection] = []
+
+    for outcome in pack.outcomes:
+        probability = outcome.weight / total_weight
+        action: Action = "vault" if outcome.value_cents > pack.price_cents else "sell"
+        if action == "vault":
+            bank_after = bank_after_buy
+            vault_after = vault_cents + outcome.value_cents
+        else:
+            bank_after = bank_after_buy + outcome.value_cents
+            vault_after = vault_cents
+
+        projected_outcomes.append(
+            PackOutcomeProjection(
+                card_value_cents=outcome.value_cents,
+                weight=outcome.weight,
+                probability=probability,
+                action=action,
+                bank_after_cents=bank_after,
+                vault_after_cents=vault_after,
+                total_after_cents=bank_after + vault_after,
+                can_open_same_pack_again=bank_after - pack.price_cents >= min_bank_cents,
+            )
+        )
+
+    expected_card = sum(
+        projection.card_value_cents * projection.probability
+        for projection in projected_outcomes
+    )
+    expected_bank_after = sum(
+        projection.bank_after_cents * projection.probability
+        for projection in projected_outcomes
+    )
+    expected_total_after = sum(
+        projection.total_after_cents * projection.probability
+        for projection in projected_outcomes
+    )
+
+    return PackOpenProjection(
+        pack_id=pack.id,
+        pack_name=pack.name,
+        price_cents=pack.price_cents,
+        bank_before_cents=bank_cents,
+        vault_before_cents=vault_cents,
+        min_bank_cents=min_bank_cents,
+        can_buy=can_buy,
+        bank_after_buy_cents=bank_after_buy,
+        expected_card_value_cents=expected_card,
+        expected_bank_after_cents=expected_bank_after,
+        expected_total_after_cents=expected_total_after,
+        sell_probability=sum(
+            projection.probability
+            for projection in projected_outcomes
+            if projection.action == "sell"
+        ),
+        vault_probability=sum(
+            projection.probability
+            for projection in projected_outcomes
+            if projection.action == "vault"
+        ),
+        total_profit_probability=sum(
+            projection.probability
+            for projection in projected_outcomes
+            if projection.card_value_cents > pack.price_cents
+        ),
+        bank_profit_probability=sum(
+            projection.probability
+            for projection in projected_outcomes
+            if projection.bank_after_cents > bank_cents
+        ),
+        can_open_same_pack_again_probability=sum(
+            projection.probability
+            for projection in projected_outcomes
+            if projection.can_open_same_pack_again
+        ),
+        worst_bank_after_cents=min(
+            projection.bank_after_cents for projection in projected_outcomes
+        ),
+        best_bank_after_cents=max(
+            projection.bank_after_cents for projection in projected_outcomes
+        ),
+        outcomes=tuple(projected_outcomes),
+    )

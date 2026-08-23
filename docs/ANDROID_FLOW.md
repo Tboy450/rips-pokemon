@@ -30,9 +30,9 @@ Screen size in the sample: `1080x2340` portrait.
 6. `card_result`
    - Shows the revealed card, large value, card name, `Sell`, and `Vault`.
    - This is the main decision state.
-   - Read `revealed_card_value`, compare it to the tracked vault value, then choose:
-     - `vault` if card value is greater than vault value.
-     - `sell` otherwise.
+   - Read `revealed_card_value`, compare it to the pack cost, then choose:
+     - `vault` if card value is greater than the pack cost.
+     - `sell` otherwise to preserve bank liquidity.
 
 7. `buyback_sheet`
    - Appears after choosing Sell.
@@ -53,7 +53,7 @@ Screen size in the sample: `1080x2340` portrait.
 Read a result screen and decide against a known vault:
 
 ```bash
-python -m rips_ai advise-screen analysis_frames/time_020.jpg --state result --vault 2.50
+python -m rips_ai advise-screen analysis_frames/time_020.jpg --state result --pack-price 1.00
 ```
 
 Read pack-screen bank and check the bank floor before a buy:
@@ -93,6 +93,6 @@ Live capture path:
 ```bash
 python -m rips_ai device-capture
 python -m rips_ai device-advise --state pack --pack-price 2.50 --min-bank 10
-python -m rips_ai device-advise --state result --vault 2.50
+python -m rips_ai device-advise --state result --pack-price 1.00
 python -m rips_ai device-advise --state buyback --expected-sell 0.30
 ```

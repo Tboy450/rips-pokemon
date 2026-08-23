@@ -14,10 +14,10 @@ from .core import (
     GameState,
     apply_round,
     cents_to_dollars,
-    decide_revealed_card,
     dollars_to_cents,
     find_pack,
     load_packs,
+    project_pack_open,
     round_to_record,
     run_session,
 )
@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     recommend = subparsers.add_parser("recommend", help="recommend the next action")
     recommend.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     recommend.add_argument("--bank", required=True, help="current cash bank")
-    recommend.add_argument("--vault", default="0.00", help="current best vaulted card")
+    recommend.add_argument("--vault", default="0.00", help="current vault value")
     recommend.add_argument("--min-bank", default="10.00", help="cash floor")
     recommend.add_argument(
         "--allow-negative-ev",
@@ -171,7 +171,8 @@ def build_parser() -> argparse.ArgumentParser:
     session_start = subparsers.add_parser("session-start", help="start/reset live app tracking")
     session_start.add_argument("--session", type=Path, default=DEFAULT_SESSION)
     session_start.add_argument("--bank", required=True, help="current cash bank")
-    session_start.add_argument("--vault", default="0.00", help="current best vault value")
+    session_start.add_argument("--vault", default="0.00", help="current vault total value")
+    session_start.add_argument("--vault-count", type=int, default=0, help="number of cards currently in vault")
     session_start.add_argument("--min-bank", default="10.00", help="cash floor")
     session_start.add_argument(
         "--force",
@@ -193,6 +194,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow best eligible pack even when observed EV is negative",
     )
+
+    session_plan = subparsers.add_parser(
+        "session-plan",
+        help="show probability-adjusted bank/vault projection for a pack",
+    )
+    session_plan.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+    session_plan.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    session_plan.add_argument("--pack", default="one_dollar", help="pack id from config")
 
     session_buy = subparsers.add_parser(
         "session-buy",
@@ -542,21 +551,21 @@ def command_advise_screen(args: argparse.Namespace) -> int:
         return 0
 
     if args.state == "result":
-        if args.vault is None:
+        if args.pack_price is None:
             print("action: wait")
-            print("reason: --vault is required because the result screen does not show current vault value")
+            print("reason: --pack-price is required for result-state advice")
             return 0
         if observation.card_value_cents is None:
             print("action: wait")
             print("reason: revealed card value was not measurable")
             return 0
-        vault = dollars_to_cents(args.vault)
-        action = decide_revealed_card(vault, observation.card_value_cents)
+        pack_price = dollars_to_cents(args.pack_price)
+        action = "vault" if observation.card_value_cents > pack_price else "sell"
         print(f"action: {action}")
         print(
             "reason: card "
-            f"{cents_to_dollars(observation.card_value_cents)} vs vault "
-            f"{cents_to_dollars(vault)}"
+            f"{cents_to_dollars(observation.card_value_cents)} vs pack cost "
+            f"{cents_to_dollars(pack_price)}"
         )
         return 0
 
@@ -600,6 +609,7 @@ def _load_session(path: Path) -> LiveSession:
 def _print_session(session: LiveSession) -> None:
     print(f"bank: {cents_to_dollars(session.bank_cents)}")
     print(f"vault: {cents_to_dollars(session.vault_cents)}")
+    print(f"vault cards: {session.vault_count}")
     print(f"total tracked value: {cents_to_dollars(session.total_value_cents)}")
     print(f"cash floor: {cents_to_dollars(session.min_bank_cents)}")
     print(f"opened: {session.opened_count}")
@@ -611,6 +621,46 @@ def _print_session(session: LiveSession) -> None:
             print(f"pending card: {cents_to_dollars(session.pending.card_value_cents)}")
         if session.pending.advised_action is not None:
             print(f"pending action: {session.pending.advised_action}")
+
+
+def _format_probability(value: float) -> str:
+    return f"{value * 100:.1f}%"
+
+
+def _print_pack_projection(session: LiveSession, pack) -> None:
+    projection = project_pack_open(
+        bank_cents=session.bank_cents,
+        vault_cents=session.vault_cents,
+        min_bank_cents=session.min_bank_cents,
+        pack=pack,
+    )
+    print(f"pack: {projection.pack_name} ({projection.pack_id})")
+    print(f"price: {cents_to_dollars(projection.price_cents)}")
+    if not projection.can_buy:
+        print("action: stop")
+        print(
+            "reason: buying would leave "
+            f"{cents_to_dollars(projection.bank_after_buy_cents)}, below floor "
+            f"{cents_to_dollars(projection.min_bank_cents)}"
+        )
+        return
+
+    print("action: open manually if you accept the risk")
+    print(f"bank after buy: {cents_to_dollars(projection.bank_after_buy_cents)}")
+    print(f"expected card value: {cents_to_dollars(round(projection.expected_card_value_cents))}")
+    print(f"expected card profit: {cents_to_dollars(round(projection.expected_card_profit_cents))}")
+    print(f"expected bank after resolution: {cents_to_dollars(round(projection.expected_bank_after_cents))}")
+    print(f"expected bank change: {cents_to_dollars(round(projection.expected_bank_delta_cents))}")
+    print(f"expected total change: {cents_to_dollars(round(projection.expected_total_delta_cents))}")
+    print(f"sell probability: {_format_probability(projection.sell_probability)}")
+    print(f"vault probability: {_format_probability(projection.vault_probability)}")
+    print(f"profit probability: {_format_probability(projection.total_profit_probability)}")
+    print(
+        "same-pack reopen probability: "
+        f"{_format_probability(projection.can_open_same_pack_again_probability)}"
+    )
+    print(f"worst bank after resolution: {cents_to_dollars(projection.worst_bank_after_cents)}")
+    print(f"best bank after resolution: {cents_to_dollars(projection.best_bank_after_cents)}")
 
 
 def _log_committed_event(ledger: Path, event: dict[str, object]) -> None:
@@ -651,6 +701,7 @@ def command_session_start(args: argparse.Namespace) -> int:
         bank_cents=dollars_to_cents(args.bank),
         vault_cents=dollars_to_cents(args.vault),
         min_bank_cents=dollars_to_cents(args.min_bank),
+        vault_count=args.vault_count,
     )
     save_live_session(args.session, session)
     print(f"session: {args.session}")
@@ -699,9 +750,25 @@ def command_session_recommend(args: argparse.Namespace) -> int:
         return 0
 
     print(f"recommendation: open {pack.name} ({pack.id})")
-    print(f"price: {cents_to_dollars(pack.price_cents)}")
-    print(f"bank after buy: {cents_to_dollars(session.bank_cents - pack.price_cents)}")
-    print(f"estimated EV: {cents_to_dollars(round(pack.expected_value_cents))}")
+    _print_pack_projection(session, pack)
+    return 0
+
+
+def command_session_plan(args: argparse.Namespace) -> int:
+    try:
+        session = _load_session(args.session)
+        pack = find_pack(load_packs(args.config), args.pack)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if session.pending is not None:
+        print("action: wait")
+        print("reason: finish the pending pack result first")
+        _print_session(session)
+        return 0
+
+    _print_pack_projection(session, pack)
     return 0
 
 
@@ -709,6 +776,7 @@ def command_session_buy(args: argparse.Namespace) -> int:
     try:
         session = _load_session(args.session)
         pack = find_pack(load_packs(args.config), args.pack)
+        _print_pack_projection(session, pack)
         begin_pending_pack(session, pack.id, pack.price_cents)
     except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
@@ -748,6 +816,7 @@ def command_session_result(args: argparse.Namespace) -> int:
             print(f"committed: {event['action']}")
             print(f"bank: {cents_to_dollars(session.bank_cents)}")
             print(f"vault: {cents_to_dollars(session.vault_cents)}")
+            print(f"vault cards: {session.vault_count}")
             save_live_session(args.session, session)
             _log_committed_event(args.ledger, event)
             return 0
@@ -809,6 +878,7 @@ def command_session_vault(args: argparse.Namespace) -> int:
     print(f"committed: {event['action']}")
     print(f"bank: {cents_to_dollars(session.bank_cents)}")
     print(f"vault: {cents_to_dollars(session.vault_cents)}")
+    print(f"vault cards: {session.vault_count}")
     _log_committed_event(args.ledger, event)
     return 0
 
@@ -902,7 +972,9 @@ def _handle_session_result_screen(args: argparse.Namespace, session: LiveSession
             event = commit_vault(session)
             save_live_session(args.session, session)
             print(f"committed: {event['action']}")
+            print(f"bank: {cents_to_dollars(session.bank_cents)}")
             print(f"vault: {cents_to_dollars(session.vault_cents)}")
+            print(f"vault cards: {session.vault_count}")
             _log_committed_event(args.ledger, event)
         else:
             save_live_session(args.session, session)
@@ -989,6 +1061,7 @@ def main(argv: list[str] | None = None) -> int:
         "session-start": command_session_start,
         "session-status": command_session_status,
         "session-recommend": command_session_recommend,
+        "session-plan": command_session_plan,
         "session-buy": command_session_buy,
         "session-result": command_session_result,
         "session-buyback": command_session_buyback,

@@ -14,6 +14,7 @@ class PendingPack:
     pack_price_cents: int
     bank_before_cents: int
     vault_before_cents: int
+    vault_count_before: int = 0
     card_value_cents: int | None = None
     advised_action: Action | None = None
     expected_buyback_cents: int | None = None
@@ -24,6 +25,7 @@ class PendingPack:
 class LiveSession:
     bank_cents: int
     vault_cents: int = 0
+    vault_count: int = 0
     min_bank_cents: int = 1000
     opened_count: int = 0
     pending: PendingPack | None = None
@@ -44,9 +46,11 @@ def utc_now() -> str:
 def load_live_session(path: Path) -> LiveSession:
     raw = json.loads(path.read_text(encoding="utf-8"))
     pending = raw.get("pending")
+    vault_cents = int(raw.get("vault_cents", 0))
     return LiveSession(
         bank_cents=int(raw["bank_cents"]),
-        vault_cents=int(raw.get("vault_cents", 0)),
+        vault_cents=vault_cents,
+        vault_count=int(raw.get("vault_count", 1 if vault_cents > 0 else 0)),
         min_bank_cents=int(raw.get("min_bank_cents", 1000)),
         opened_count=int(raw.get("opened_count", 0)),
         pending=PendingPack(**pending) if pending else None,
@@ -59,10 +63,16 @@ def save_live_session(path: Path, session: LiveSession) -> None:
     path.write_text(json.dumps(asdict(session), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def start_live_session(bank_cents: int, vault_cents: int, min_bank_cents: int) -> LiveSession:
+def start_live_session(
+    bank_cents: int,
+    vault_cents: int,
+    min_bank_cents: int,
+    vault_count: int = 0,
+) -> LiveSession:
     return LiveSession(
         bank_cents=bank_cents,
         vault_cents=vault_cents,
+        vault_count=vault_count,
         min_bank_cents=min_bank_cents,
     )
 
@@ -82,6 +92,7 @@ def begin_pending_pack(session: LiveSession, pack_id: str, pack_price_cents: int
         pack_price_cents=pack_price_cents,
         bank_before_cents=session.bank_cents,
         vault_before_cents=session.vault_cents,
+        vault_count_before=session.vault_count,
     )
     session.bank_cents -= pack_price_cents
 
@@ -94,7 +105,11 @@ def advise_pending_result(
     if session.pending is None:
         raise ValueError("no pending pack; run session-buy first")
 
-    action: Action = "vault" if card_value_cents > session.vault_cents else "sell"
+    action: Action = (
+        "vault"
+        if card_value_cents > session.pending.pack_price_cents
+        else "sell"
+    )
     session.pending.card_value_cents = card_value_cents
     session.pending.advised_action = action
     session.pending.expected_buyback_cents = card_value_cents if action == "sell" else None
@@ -107,8 +122,9 @@ def commit_vault(session: LiveSession) -> dict[str, object]:
     pending = _require_pending_result(session, "vault")
     assert pending.card_value_cents is not None
 
-    session.vault_cents = max(session.vault_cents, pending.card_value_cents)
-    event = _event(session, pending, "vault", pending.card_value_cents)
+    session.vault_cents += pending.card_value_cents
+    session.vault_count += 1
+    event = _event(session, pending, "vault", 0)
     _finish_pending(session, event)
     return event
 
@@ -162,11 +178,18 @@ def _event(
         "card_value_cents": pending.card_value_cents,
         "action": action,
         "realized_cents": realized_cents,
+        "bank_return_cents": realized_cents,
+        "bank_after_buy_cents": pending.bank_before_cents - pending.pack_price_cents,
         "bank_before_cents": pending.bank_before_cents,
         "vault_before_cents": pending.vault_before_cents,
+        "vault_count_before": pending.vault_count_before,
         "bank_after_cents": session.bank_cents,
         "vault_after_cents": session.vault_cents,
+        "vault_count_after": session.vault_count,
         "total_after_cents": session.total_value_cents,
+        "total_before_cents": pending.bank_before_cents + pending.vault_before_cents,
+        "bank_delta_cents": session.bank_cents - pending.bank_before_cents,
+        "total_delta_cents": session.total_value_cents
+        - (pending.bank_before_cents + pending.vault_before_cents),
         "rarity_hint": pending.rarity_hint,
     }
-

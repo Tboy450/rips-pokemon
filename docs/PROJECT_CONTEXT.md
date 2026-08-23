@@ -8,11 +8,12 @@ Build toward a screen-aware assistant that can:
 
 1. Keep the cash bank at or above a configurable floor, currently `$10.00`.
 2. Focus first on the `$1.00` and `$2.50` Pokemon packs.
-3. Track the current best vaulted card.
+3. Track the current vault collection total and card count.
 4. Read each revealed card value from screenshots or live Android capture.
-5. Advise `vault` only when the revealed card beats the tracked vault value.
-6. Advise `sell` otherwise, then verify the buyback amount before updating bank.
-7. Collect real observed outcomes over time so placeholder pack assumptions can be replaced.
+5. Track vault as a total collection value and card count.
+6. Advise `vault` when the revealed card is worth more than the pack cost.
+7. Advise `sell` otherwise, then verify the buyback amount before updating bank.
+8. Collect real observed outcomes over time so placeholder pack assumptions can be replaced.
 
 The current implementation is advisor-first. It should not tap purchases automatically until the screen reading, state tracking, and safety checks are reliable.
 
@@ -21,10 +22,10 @@ The current implementation is advisor-first. It should not tap purchases automat
 - Buying a pack immediately deducts its price from tracked bank.
 - A buy is blocked if it would put bank below the cash floor.
 - A result screen creates one pending decision:
-  - `vault` if card value is greater than current vault.
-  - `sell` if card value is less than or equal to current vault.
+  - `vault` if card value is greater than the pack cost.
+  - `sell` if card value is less than or equal to the pack cost.
 - A sell is only committed after the buyback sheet amount matches the expected card value.
-- A vault is only committed after the user taps Vault in the app.
+- A vault is only committed after the user taps Vault in the app; it adds the card value to tracked vault total and increments vault card count.
 - The session tracker stores bank, vault, opened count, pending pack, and history in `data/live_session.json`.
 - Committed live sell/vault events are appended to `data/outcomes.jsonl` by default.
 
@@ -36,8 +37,9 @@ The current implementation is advisor-first. It should not tap purchases automat
 At the time this context was written, the local working session was:
 
 ```text
-bank: $14.00
-vault: $0.00
+bank: $13.00
+vault: $7.10
+vault cards: 3
 cash floor: $10.00
 pending: none
 ```
@@ -45,7 +47,7 @@ pending: none
 Recreate that state on a new device with:
 
 ```bash
-python -m rips_ai session-start --bank 14 --vault 0 --min-bank 10 --force
+python -m rips_ai session-start --bank 13 --vault 7.10 --vault-count 3 --min-bank 10 --force
 ```
 
 If the real app state has changed, start with the current real bank and vault instead.
@@ -85,6 +87,12 @@ Recommend the next pack from placeholder pack data:
 
 ```bash
 python -m rips_ai session-recommend
+```
+
+Check the `$1` pack with probability-weighted bank/vault projections:
+
+```bash
+python -m rips_ai session-plan --pack one_dollar
 ```
 
 Use a screenshot-first workflow:

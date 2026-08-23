@@ -8,8 +8,8 @@ The current goal is not to automate purchases. It models the decision after a pa
 2. Focus on the `$1.00` and `$2.50` packs.
 3. Open one pack manually in the Android app.
 4. Enter the final card sell value into this tool.
-5. Vault the card only if it beats the current vaulted card.
-6. When a new card replaces the vault card, sell the old vault card back into the bank.
+5. Treat the vault as a total collection value, not one replaceable card.
+6. Vault profitable cards when the card value is greater than the pack cost.
 7. Otherwise, sell the new card back into the bank.
 
 ## App Flow Notes
@@ -81,7 +81,7 @@ python -m rips_ai read-regions /path/to/screenshot.png
 Ask for state-specific advice from a screenshot:
 
 ```bash
-python -m rips_ai advise-screen /path/to/result.png --state result --vault 2.50
+python -m rips_ai advise-screen /path/to/result.png --state result --pack-price 1.00
 python -m rips_ai advise-screen /path/to/pack.png --state pack --pack-price 2.50 --min-bank 10
 python -m rips_ai advise-screen /path/to/buyback.png --state buyback --expected-sell 0.30
 ```
@@ -102,6 +102,12 @@ Ask what to open next:
 
 ```bash
 python -m rips_ai session-recommend
+```
+
+Check the probability-adjusted `$1` pack plan before opening:
+
+```bash
+python -m rips_ai session-plan --pack one_dollar
 ```
 
 Use one screenshot and let the tool classify the current Rips screen:
@@ -129,6 +135,9 @@ python -m rips_ai session-result --image /path/to/result.png --rarity-hint "blue
 python -m rips_ai session-result --card-value 0.30 --rarity-hint "blue flashes"
 ```
 
+For live tracking, values above the pack cost are advised as `vault`; values at
+or below the pack cost are advised as `sell` to preserve bank liquidity.
+
 If the advice is `sell`, tap Sell in the app, then verify the buyback sheet:
 
 ```bash
@@ -151,7 +160,7 @@ Capture the live Android screen through Shizuku when available:
 
 ```bash
 python -m rips_ai device-capture
-python -m rips_ai device-advise --state result --vault 2.50
+python -m rips_ai device-advise --state result --pack-price 1.00
 ```
 
 If `device-capture` times out, Android is still blocking Codex to Shizuku communication. Set both apps to unrestricted battery usage and confirm Shizuku service is running.
