@@ -6,10 +6,12 @@ import re
 import shlex
 import shutil
 import subprocess
+import zlib
 from pathlib import Path
 
-READ_CHUNK_BYTES = 1024
-CHUNK_RE = re.compile(r"__RIPS_CHUNK_(\d{8})__([A-Za-z0-9+/=]+)__END__")
+READ_CHUNK_BYTES = 16 * 1024
+BASE64_CHARS_RE = re.compile(r"[A-Za-z0-9+/=]")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 class DeviceAccessError(RuntimeError):
@@ -45,29 +47,39 @@ def _read_remote_file(
         message = size_result.stderr.strip() or size_result.stdout.strip()
         raise DeviceAccessError(message or f"screenshot was not readable at {remote_path}")
 
-    size_match = re.search(r"\d+", size_result.stdout)
+    size_match = re.search(r"\d+", f"{size_result.stdout}\n{size_result.stderr}")
     if size_match is None:
         raise DeviceAccessError(f"could not determine screenshot size at {remote_path}")
     expected_size = int(size_match.group(0))
     if expected_size <= 0:
         raise DeviceAccessError(f"screenshot was empty at {remote_path}")
 
+    chunks: list[bytes] = []
     chunk_count = (expected_size + READ_CHUNK_BYTES - 1) // READ_CHUNK_BYTES
-    command = f"""
-i=0
-while [ "$i" -lt {chunk_count} ]; do
-  printf '__RIPS_CHUNK_%08d__' "$i"
-  dd if={quoted_path} bs={READ_CHUNK_BYTES} skip="$i" count=1 2>/dev/null | base64 | tr -d '\\n'
-  printf '__END__\\n'
-  i=$((i + 1))
-done
-"""
-    result = _run_shizuku_text(shizuku, command, timeout_seconds)
-    if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip()
-        raise DeviceAccessError(message or "could not read captured screenshot")
+    for index in range(chunk_count):
+        expected_chunk_size = min(
+            READ_CHUNK_BYTES,
+            expected_size - (index * READ_CHUNK_BYTES),
+        )
+        command = (
+            f"dd if={quoted_path} bs={READ_CHUNK_BYTES} "
+            f"skip={index} count=1 2>/dev/null | base64 | tr -d '\\n'"
+        )
+        result = _run_shizuku_text(shizuku, command, timeout_seconds)
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip()
+            raise DeviceAccessError(message or f"could not read screenshot chunk {index + 1}")
+        chunks.append(
+            _decode_base64_chunk(
+                result.stdout,
+                result.stderr,
+                expected_chunk_size,
+                index,
+                required_prefix=b"\x89PNG\r\n\x1a\n" if index == 0 else b"",
+            )
+        )
 
-    image_bytes = _decode_indexed_chunks(result.stdout, result.stderr, chunk_count)
+    image_bytes = b"".join(chunks)
     if len(image_bytes) != expected_size:
         raise DeviceAccessError(
             f"screenshot readback size mismatch: expected {expected_size}, got {len(image_bytes)}"
@@ -75,22 +87,35 @@ done
     return image_bytes
 
 
-def _decode_indexed_chunks(stdout: str, stderr: str, chunk_count: int) -> bytes:
-    chunks: dict[int, bytes] = {}
-    for match in CHUNK_RE.finditer(f"{stdout}\n{stderr}"):
-        index = int(match.group(1))
-        if index >= chunk_count:
+def _decode_base64_chunk(
+    stdout: str,
+    stderr: str,
+    expected_size: int,
+    chunk_index: int,
+    required_prefix: bytes = b"",
+) -> bytes:
+    stdout_encoded = "".join(BASE64_CHARS_RE.findall(stdout))
+    stderr_encoded = "".join(BASE64_CHARS_RE.findall(stderr))
+    if stdout_encoded and stderr_encoded:
+        candidates = (
+            stdout_encoded + stderr_encoded,
+            stderr_encoded + stdout_encoded,
+            stdout_encoded,
+            stderr_encoded,
+        )
+    else:
+        candidates = (stdout_encoded, stderr_encoded)
+
+    for encoded in candidates:
+        if not encoded:
             continue
         try:
-            chunks[index] = base64.b64decode(match.group(2), validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise DeviceAccessError(f"screenshot chunk {index + 1} was not valid base64") from exc
-
-    missing = [index + 1 for index in range(chunk_count) if index not in chunks]
-    if missing:
-        preview = ", ".join(str(index) for index in missing[:5])
-        raise DeviceAccessError(f"missing screenshot chunk(s): {preview}")
-    return b"".join(chunks[index] for index in range(chunk_count))
+            decoded = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        if len(decoded) == expected_size and decoded.startswith(required_prefix):
+            return decoded
+    raise DeviceAccessError(f"screenshot chunk {chunk_index + 1} was not valid base64")
 
 
 def capture_screenshot(
@@ -122,9 +147,38 @@ def capture_screenshot(
         raise DeviceAccessError(message or "Shizuku screencap failed")
 
     image_bytes = _read_remote_file(shizuku, remote_path, timeout_seconds)
-    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise DeviceAccessError("captured screenshot was not a PNG image")
+    _validate_png(image_bytes)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(image_bytes)
     return output_path
+
+
+def _validate_png(image_bytes: bytes) -> None:
+    if not image_bytes.startswith(PNG_SIGNATURE):
+        raise DeviceAccessError("captured screenshot was not a PNG image")
+
+    offset = len(PNG_SIGNATURE)
+    while offset + 12 <= len(image_bytes):
+        length = int.from_bytes(image_bytes[offset : offset + 4], "big")
+        chunk_type = image_bytes[offset + 4 : offset + 8]
+        data_start = offset + 8
+        data_end = data_start + length
+        crc_end = data_end + 4
+        if crc_end > len(image_bytes):
+            raise DeviceAccessError("captured screenshot PNG was truncated")
+
+        actual_crc = int.from_bytes(image_bytes[data_end:crc_end], "big")
+        expected_crc = zlib.crc32(chunk_type)
+        expected_crc = zlib.crc32(image_bytes[data_start:data_end], expected_crc) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            name = chunk_type.decode("ascii", errors="replace")
+            raise DeviceAccessError(f"captured screenshot PNG CRC failed in {name}")
+
+        offset = crc_end
+        if chunk_type == b"IEND":
+            if offset != len(image_bytes):
+                raise DeviceAccessError("captured screenshot PNG had trailing data")
+            return
+
+    raise DeviceAccessError("captured screenshot PNG was missing IEND")
