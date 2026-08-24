@@ -38,7 +38,11 @@ The current implementation is advisor-first. It should not tap purchases automat
   records the replaced value as the expected old-card return. If no per-card
   vault values are known, it adds the card value to the tracked vault total and
   increments vault card count.
-- Bankroll tiering keeps live recommendations on `$1` packs until bank reaches the `$2.50` unlock threshold, default `$15.00`; if bank drops below that threshold, recommendations fall back to `$1`.
+- Bankroll tiering keeps live recommendations on `$1` packs until bank reaches
+  the `$2.50` unlock threshold, default `$20.00`; if bank drops below that
+  threshold, recommendations fall back to `$1`. This temporary higher threshold
+  is intentional until bank and vault value updates are consistently correct in
+  live runs.
 - The session tracker stores bank, vault, opened count, pending pack, and history in `data/live_session.json`.
 - Committed live sell/vault events are appended to `data/outcomes.jsonl` by default.
 - Visible bank checks are explicit audits. `session-bank-check` reports the
@@ -152,7 +156,7 @@ Compare the locked or unlocked `$2.50` tier with its own probability table:
 
 ```bash
 python -m rips_ai session-plan --pack two_fifty
-python -m rips_ai session-recommend --two-fifty-bank 15
+python -m rips_ai session-recommend --two-fifty-bank 20
 ```
 
 Use a screenshot-first workflow:

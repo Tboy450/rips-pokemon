@@ -131,8 +131,9 @@ python -m rips_ai advise-screen analysis_frames/time_001.jpg --state pack --pack
 ```
 
 Use the live recommender for tier choice: it stays on `$1` packs until the
-configured `$2.50` unlock bank, default `$15.00`, then falls back to `$1` if
-bank drops below that threshold.
+configured `$2.50` unlock bank, default `$20.00`, then falls back to `$1` if
+bank drops below that threshold. This higher temporary threshold is intentional
+until bank and vault value updates are consistently verified during live runs.
 
 Read a buyback sheet and accept only if the amount matches:
 

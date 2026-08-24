@@ -121,6 +121,50 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertIn("recommendation: open $1 Pack (one_dollar)", text)
         self.assertIn("tier: $1 fallback until bank reaches $15.00", text)
 
+    def test_session_recommend_default_sticks_to_one_dollar_until_twenty(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "16.50",
+                            "--vault",
+                            "6.80",
+                            "--vault-count",
+                            "2",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-recommend",
+                            "--session",
+                            str(session),
+                            "--config",
+                            str(config),
+                        ]
+                    ),
+                    0,
+                )
+
+        text = output.getvalue()
+        self.assertIn("recommendation: open $1 Pack (one_dollar)", text)
+        self.assertIn("tier: $1 fallback until bank reaches $20.00", text)
+
     def test_session_recommend_unlocks_two_fifty_at_threshold(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

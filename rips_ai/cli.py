@@ -59,7 +59,7 @@ DEFAULT_CONFIG = Path("config/packs.example.json")
 DEFAULT_SESSION = Path("data/live_session.json")
 DEFAULT_LEDGER = Path("data/outcomes.jsonl")
 DEFAULT_FLOW = Path("config/rips_android_flow.json")
-DEFAULT_TWO_FIFTY_BANK = "15.00"
+DEFAULT_TWO_FIFTY_BANK = "20.00"
 
 
 def build_parser() -> argparse.ArgumentParser:
