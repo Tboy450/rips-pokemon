@@ -172,11 +172,16 @@ Bank verification after a draw:
 python -m rips_ai session-bank-check --bank 11
 python -m rips_ai session-bank-check --image data/latest_screen.png
 python -m rips_ai session-bank-check --bank 11 --source "visible app bank after draw" --commit
+python -m rips_ai session-reconcile --bank 11.30 --vault 8.90 --vault-count 5 --clear-pending --count-cleared-pending --commit
 ```
 
 Use this after pack result resolution, sell/buyback, vault, or returning to the
 buy screen. It prints tracked bank, observed bank, delta, and pending state.
-Only use `--commit` after the visible bank is trusted.
+Only use `--commit` after the visible bank is trusted. Use `session-reconcile`
+when an interruption, notification, manual sell/vault, or app switch leaves the
+tracker with stale pending state but the real app is already back to a resolved
+bank/vault/card-count state. Add `--count-cleared-pending` when the cleared
+pending pack really completed and should increment `opened`.
 
 Vault gallery appraisal:
 

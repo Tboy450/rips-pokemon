@@ -215,6 +215,14 @@ the session unless the visible value is trusted and `--commit` is supplied:
 python -m rips_ai session-bank-check --bank 11 --source "visible app bank after draw" --commit
 ```
 
+If the app was interrupted and the tracker needs to align to a trusted resolved
+state, reconcile bank, vault, card count, and stale pending state together:
+
+```bash
+python -m rips_ai session-reconcile --bank 11.30 --vault 8.90 --vault-count 5 --clear-pending
+python -m rips_ai session-reconcile --bank 11.30 --vault 8.90 --vault-count 5 --clear-pending --count-cleared-pending --commit
+```
+
 Audit the gallery-style vault by long-pressing each card for its appraisal
 value, recording the values, and entering them together:
 

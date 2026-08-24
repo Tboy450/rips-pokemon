@@ -123,6 +123,56 @@ def commit_vault_audit(
     return event
 
 
+def commit_state_reconciliation(
+    session: LiveSession,
+    observed_bank_cents: int,
+    observed_vault_cents: int,
+    observed_vault_count: int,
+    clear_pending: bool = False,
+    count_cleared_pending: bool = False,
+    observed_opened_count: int | None = None,
+    source: str | None = None,
+) -> dict[str, object]:
+    previous_pending = None if session.pending is None else asdict(session.pending)
+    previous_opened_count = session.opened_count
+    if observed_opened_count is not None:
+        next_opened_count = observed_opened_count
+    elif clear_pending and count_cleared_pending and session.pending is not None:
+        next_opened_count = session.opened_count + 1
+    else:
+        next_opened_count = session.opened_count
+    event = {
+        "recorded_at": utc_now(),
+        "type": "state_reconciliation",
+        "source": source,
+        "bank_before_cents": session.bank_cents,
+        "vault_before_cents": session.vault_cents,
+        "vault_before_count": session.vault_count,
+        "opened_before_count": previous_opened_count,
+        "observed_bank_cents": observed_bank_cents,
+        "observed_vault_cents": observed_vault_cents,
+        "observed_vault_count": observed_vault_count,
+        "observed_opened_count": observed_opened_count,
+        "bank_delta_cents": observed_bank_cents - session.bank_cents,
+        "vault_delta_cents": observed_vault_cents - session.vault_cents,
+        "vault_count_delta": observed_vault_count - session.vault_count,
+        "opened_count_delta": next_opened_count - previous_opened_count,
+        "cleared_pending": bool(clear_pending and session.pending is not None),
+        "counted_cleared_pending": bool(
+            clear_pending and count_cleared_pending and session.pending is not None
+        ),
+        "previous_pending": previous_pending,
+    }
+    session.bank_cents = observed_bank_cents
+    session.vault_cents = observed_vault_cents
+    session.vault_count = observed_vault_count
+    session.opened_count = next_opened_count
+    if clear_pending:
+        session.pending = None
+    session.history.append(event)
+    return event
+
+
 def begin_pending_pack(session: LiveSession, pack_id: str, pack_price_cents: int) -> None:
     if session.pending is not None:
         raise ValueError("session already has a pending pack result")

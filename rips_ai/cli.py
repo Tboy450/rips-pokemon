@@ -44,6 +44,7 @@ from .session import (
     begin_pending_pack,
     commit_bank_reconciliation,
     commit_buyback,
+    commit_state_reconciliation,
     commit_vault_audit,
     commit_vault,
     load_live_session,
@@ -235,6 +236,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--commit",
         action="store_true",
         help="replace tracked vault total/card count with the observed audit values",
+    )
+
+    session_reconcile = subparsers.add_parser(
+        "session-reconcile",
+        help="align tracked bank/vault/card-count with trusted visible app state",
+    )
+    session_reconcile.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+    session_reconcile.add_argument("--bank", required=True, help="trusted visible bank value")
+    session_reconcile.add_argument("--vault", required=True, help="trusted visible vault total")
+    session_reconcile.add_argument("--vault-count", type=int, required=True, help="trusted visible vault card count")
+    session_reconcile.add_argument(
+        "--clear-pending",
+        action="store_true",
+        help="clear any stale pending pack because the app is back to a resolved state",
+    )
+    session_reconcile.add_argument(
+        "--count-cleared-pending",
+        action="store_true",
+        help="increment opened count if --clear-pending represents a real completed pack",
+    )
+    session_reconcile.add_argument("--opened-count", type=int, help="trusted total opened count")
+    session_reconcile.add_argument("--source", default="manual app state reconciliation")
+    session_reconcile.add_argument(
+        "--commit",
+        action="store_true",
+        help="write the trusted app state into the live session",
     )
 
     session_recommend = subparsers.add_parser(
@@ -1123,6 +1150,78 @@ def command_session_vault_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_session_reconcile(args: argparse.Namespace) -> int:
+    try:
+        session = _load_session(args.session)
+        observed_bank = dollars_to_cents(args.bank)
+        observed_vault = dollars_to_cents(args.vault)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if args.vault_count < 0:
+        print("--vault-count cannot be negative", file=sys.stderr)
+        return 1
+    if args.opened_count is not None and args.opened_count < 0:
+        print("--opened-count cannot be negative", file=sys.stderr)
+        return 1
+    if args.count_cleared_pending and not args.clear_pending:
+        print("--count-cleared-pending requires --clear-pending", file=sys.stderr)
+        return 1
+
+    bank_delta = observed_bank - session.bank_cents
+    vault_delta = observed_vault - session.vault_cents
+    count_delta = args.vault_count - session.vault_count
+    if args.opened_count is not None:
+        planned_opened_count = args.opened_count
+    elif args.clear_pending and args.count_cleared_pending and session.pending is not None:
+        planned_opened_count = session.opened_count + 1
+    else:
+        planned_opened_count = session.opened_count
+    print("reconcile: trusted app state")
+    print(f"tracked bank: {cents_to_dollars(session.bank_cents)}")
+    print(f"observed bank: {cents_to_dollars(observed_bank)}")
+    print(f"bank delta: {cents_to_dollars(bank_delta)}")
+    print(f"tracked vault: {cents_to_dollars(session.vault_cents)}")
+    print(f"observed vault: {cents_to_dollars(observed_vault)}")
+    print(f"vault delta: {cents_to_dollars(vault_delta)}")
+    print(f"tracked vault cards: {session.vault_count}")
+    print(f"observed vault cards: {args.vault_count}")
+    print(f"vault card delta: {count_delta:+d}")
+    print(f"tracked opened: {session.opened_count}")
+    print(f"planned opened: {planned_opened_count}")
+    print(f"opened delta: {planned_opened_count - session.opened_count:+d}")
+    if session.pending is None:
+        print("pending: none")
+    else:
+        print(f"pending: {session.pending.pack_id} at {cents_to_dollars(session.pending.pack_price_cents)}")
+        if args.clear_pending:
+            print("pending action: clear stale pending pack")
+        else:
+            print("pending action: keep pending pack")
+
+    if not args.commit:
+        print("session mutation: none")
+        print("next: rerun with --commit after verifying these visible app values")
+        return 0
+
+    event = commit_state_reconciliation(
+        session=session,
+        observed_bank_cents=observed_bank,
+        observed_vault_cents=observed_vault,
+        observed_vault_count=args.vault_count,
+        clear_pending=args.clear_pending,
+        count_cleared_pending=args.count_cleared_pending,
+        observed_opened_count=args.opened_count,
+        source=args.source,
+    )
+    save_live_session(args.session, session)
+    print("committed: state reconciliation")
+    print(f"history event: {event['type']}")
+    _print_session(session)
+    return 0
+
+
 def command_session_recommend(args: argparse.Namespace) -> int:
     try:
         session = _load_session(args.session)
@@ -1846,6 +1945,7 @@ def main(argv: list[str] | None = None) -> int:
         "session-workflow": command_session_workflow,
         "session-bank-check": command_session_bank_check,
         "session-vault-audit": command_session_vault_audit,
+        "session-reconcile": command_session_reconcile,
         "session-recommend": command_session_recommend,
         "session-plan": command_session_plan,
         "session-buy": command_session_buy,

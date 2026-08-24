@@ -162,7 +162,12 @@ screen:
 ```bash
 python -m rips_ai session-bank-check --bank 11
 python -m rips_ai session-bank-check --bank 11 --source "visible app bank after draw" --commit
+python -m rips_ai session-reconcile --bank 11.30 --vault 8.90 --vault-count 5 --clear-pending --count-cleared-pending --commit
 ```
+
+Use `session-reconcile` after interruptions or manual app actions when the app
+state is trusted but the tracker has stale pending state. Use
+`--count-cleared-pending` only when the cleared pending pack really completed.
 
 Audit the gallery-style vault by long-pressing each card in the app to reveal
 its appraisal/detail value, then entering the values:

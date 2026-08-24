@@ -668,6 +668,100 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertEqual(loaded.vault_count, 3)
         self.assertEqual(loaded.history[-1]["type"], "vault_audit")
 
+    def test_session_reconcile_clears_stale_pending_when_committed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "11",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    main(
+                        [
+                            "session-buy",
+                            "--session",
+                            str(session),
+                            "--config",
+                            str(config),
+                            "--pack",
+                            "one_dollar",
+                            "--purchase-confirmed",
+                        ]
+                    ),
+                    0,
+                )
+
+            dry_run = io.StringIO()
+            with contextlib.redirect_stdout(dry_run):
+                result = main(
+                    [
+                        "session-reconcile",
+                        "--session",
+                        str(session),
+                        "--bank",
+                        "11.30",
+                        "--vault",
+                        "8.90",
+                        "--vault-count",
+                        "5",
+                        "--clear-pending",
+                    ]
+                )
+            loaded = load_live_session(session)
+            self.assertEqual(result, 0)
+            self.assertEqual(loaded.bank_cents, 1000)
+            self.assertIsNotNone(loaded.pending)
+            self.assertIn("session mutation: none", dry_run.getvalue())
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = main(
+                    [
+                        "session-reconcile",
+                        "--session",
+                        str(session),
+                        "--bank",
+                        "11.30",
+                        "--vault",
+                        "8.90",
+                        "--vault-count",
+                        "5",
+                        "--clear-pending",
+                        "--count-cleared-pending",
+                        "--source",
+                        "manual app state after notification",
+                        "--commit",
+                    ]
+                )
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1130)
+        self.assertEqual(loaded.vault_cents, 890)
+        self.assertEqual(loaded.vault_count, 5)
+        self.assertEqual(loaded.opened_count, 1)
+        self.assertIsNone(loaded.pending)
+        self.assertEqual(loaded.history[-1]["type"], "state_reconciliation")
+        self.assertTrue(loaded.history[-1]["cleared_pending"])
+        self.assertTrue(loaded.history[-1]["counted_cleared_pending"])
+
     def test_session_workflow_ready_includes_bank_and_vault_checks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
