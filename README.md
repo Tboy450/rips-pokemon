@@ -312,8 +312,8 @@ tracker, then require confirmation before committing anything risky.
 3. Convert `device-open-pack` into a state-machine flow.
    Instead of one timed Shizuku shell string, split the live open into steps:
    launch or focus Rips, verify the main buy screen, tap the lower orange buy
-   button, wait for the post-buy picker, use a fast long carousel spin, select
-   the centered pack, verify the slice screen, perform the long slice and fast
+   button, wait for the post-buy picker, use two fast long carousel spins in
+   the same direction, select the centered pack, verify the slice screen, perform the long slice and fast
    follow-up swipe, then wait for the result screen. Each step should have a
    timeout, a visible-state check, and a clear recovery message.
 

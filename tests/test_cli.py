@@ -1228,6 +1228,64 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertIn("stage: tap-buy", text)
         self.assertIn("input tap 540 1990", text)
 
+    def test_device_open_pack_dry_run_repeats_picker_spin_from_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            flow = root / "flow.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+            self.write_flow_config(flow)
+            raw_flow = json.loads(flow.read_text(encoding="utf-8"))
+            raw_flow["gestures"]["spin_picker_left"]["repeat_count"] = 2
+            raw_flow["gestures"]["spin_picker_left"]["repeat_delay_ms"] = 180
+            raw_flow["gestures"]["spin_picker_left"]["settle_ms"] = 1200
+            flow.write_text(json.dumps(raw_flow), encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "14.00",
+                            "--vault",
+                            "6.80",
+                            "--vault-count",
+                            "2",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "device-open-pack",
+                        "--session",
+                        str(session),
+                        "--config",
+                        str(config),
+                        "--flow",
+                        str(flow),
+                        "--pack",
+                        "one_dollar",
+                        "--stage",
+                        "finish-open",
+                        "--dry-run",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        text = output.getvalue()
+        self.assertEqual(text.count("input swipe 820 1220 260 1220 600"), 2)
+        self.assertIn("sleep 0.18", text)
+        self.assertIn("sleep 1.20", text)
+
     def test_device_vault_gallery_plan_prints_card_points(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             flow = Path(temp_dir) / "flow.json"

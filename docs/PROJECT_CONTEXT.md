@@ -244,9 +244,9 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
    post-buy picker carousel, the slice screen, the result screen, and buyback
    sheets before tapping.
 3. Convert `device-open-pack` into a state-machine flow: tap the lower buy
-   button, wait for the post-buy picker, use a fast long carousel spin, select
-   the centered pack, slice with the long swipe plus fast follow-up, then wait
-   for result.
+   button, wait for the post-buy picker, use two fast long carousel spins in
+   the same direction, select the centered pack, slice with the long swipe plus
+   fast follow-up, then wait for result.
 4. Add a result/buyback loop that reads the card value, advises `sell` or
    `vault`, and only commits after the in-app action is confirmed.
 5. Turn `device-vault-gallery-plan` into a state-aware appraisal loop. Required

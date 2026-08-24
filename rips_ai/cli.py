@@ -1875,6 +1875,18 @@ def _swipe_command(flow: dict[str, object], name: str) -> str:
     return f"input swipe {start_x} {start_y} {end_x} {end_y} {duration}"
 
 
+def _repeated_swipe_commands(flow: dict[str, object], name: str) -> list[str]:
+    gesture = _gesture(flow, name)
+    repeat_count = max(1, int(gesture.get("repeat_count", 1)))
+    repeat_delay = int(gesture.get("repeat_delay_ms", 0)) / 1000
+    commands: list[str] = []
+    for index in range(repeat_count):
+        commands.append(_swipe_command(flow, name))
+        if index < repeat_count - 1 and repeat_delay > 0:
+            commands.append(f"sleep {repeat_delay:.2f}")
+    return commands
+
+
 def _gesture_delay_seconds(
     flow: dict[str, object],
     name: str,
@@ -1915,14 +1927,14 @@ def _open_pack_sequence(
     if picker_spin in {"left", "both"}:
         commands.extend(
             [
-                _swipe_command(flow, "spin_picker_left"),
+                *_repeated_swipe_commands(flow, "spin_picker_left"),
                 f"sleep {_gesture_delay_seconds(flow, 'spin_picker_left', 'settle_ms', 1200):.2f}",
             ]
         )
     if picker_spin in {"right", "both"}:
         commands.extend(
             [
-                _swipe_command(flow, "spin_picker_right"),
+                *_repeated_swipe_commands(flow, "spin_picker_right"),
                 f"sleep {_gesture_delay_seconds(flow, 'spin_picker_right', 'settle_ms', 1200):.2f}",
             ]
         )
