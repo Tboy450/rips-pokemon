@@ -101,8 +101,15 @@ python -m rips_ai session-start --bank 14 --vault 0 --min-bank 10 --force
 Ask what to open next:
 
 ```bash
+python -m rips_ai session-workflow
 python -m rips_ai session-recommend
 ```
+
+`session-workflow` is the operational entry point. It reads the current tracker
+and prints the next commands for the current stage, including bank diagnosis,
+vault gallery audit, pending result handling, sell buyback verification, or
+vault commit. Use it after any interruption or Shizuku failure before touching
+Rips again.
 
 Check the probability-adjusted `$1` pack plan before opening:
 

@@ -190,6 +190,18 @@ def build_parser() -> argparse.ArgumentParser:
     session_status = subparsers.add_parser("session-status", help="show live tracking state")
     session_status.add_argument("--session", type=Path, default=DEFAULT_SESSION)
 
+    session_workflow = subparsers.add_parser(
+        "session-workflow",
+        help="print the state-aware live workflow checklist from the tracked session",
+    )
+    session_workflow.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+    session_workflow.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    session_workflow.add_argument(
+        "--two-fifty-bank",
+        default=DEFAULT_TWO_FIFTY_BANK,
+        help="bank threshold that unlocks $2.50 packs",
+    )
+
     session_bank_check = subparsers.add_parser(
         "session-bank-check",
         help="compare the tracked bank against a visible/manual bank total",
@@ -889,6 +901,100 @@ def command_session_status(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     _print_session(session)
+    return 0
+
+
+def _print_workflow_header(session: LiveSession) -> None:
+    print(f"tracked bank: {cents_to_dollars(session.bank_cents)}")
+    print(f"tracked vault: {cents_to_dollars(session.vault_cents)}")
+    print(f"tracked vault cards: {session.vault_count}")
+    print(f"cash floor: {cents_to_dollars(session.min_bank_cents)}")
+
+
+def _print_recovery_checks() -> None:
+    print("check: verify visible bank before the next spend or reconciliation")
+    print("  python -m rips_ai session-bank-check --bank VALUE")
+    print("check: periodically appraise the gallery vault")
+    print("  python -m rips_ai device-vault-gallery-plan")
+    print("  python -m rips_ai session-vault-audit --card-values VALUE...")
+
+
+def command_session_workflow(args: argparse.Namespace) -> int:
+    try:
+        session = _load_session(args.session)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print("workflow: live session")
+    _print_workflow_header(session)
+    if session.pending is None:
+        print("stage: ready_for_bank_check_and_pack_choice")
+        _print_recovery_checks()
+        try:
+            pack = choose_bankroll_tier_pack(
+                bank_cents=session.bank_cents,
+                min_bank_cents=session.min_bank_cents,
+                packs=load_packs(args.config),
+                two_fifty_bank_cents=dollars_to_cents(args.two_fifty_bank),
+            )
+        except ValueError as exc:
+            print("next: fix pack config")
+            print(f"reason: {exc}")
+            return 1
+        if pack is None:
+            print("next: stop")
+            print("reason: no eligible pack keeps the bank floor")
+            return 0
+        print(f"next: plan {pack.name} ({pack.id})")
+        print(f"  python -m rips_ai session-plan --pack {pack.id}")
+        print("next: open only from the confirmed main buy screen")
+        print(
+            "  python -m rips_ai device-open-pack "
+            f"--pack {pack.id} --confirmed-buy-screen"
+        )
+        print("manual fallback after the app accepts the buy/open step:")
+        print(f"  python -m rips_ai session-buy --pack {pack.id} --purchase-confirmed")
+        return 0
+
+    pending = session.pending
+    print(f"pending pack: {pending.pack_id} at {cents_to_dollars(pending.pack_price_cents)}")
+    if pending.card_value_cents is None:
+        print("stage: waiting_for_revealed_card_value")
+        print("next: read or enter the result screen value")
+        print("  python -m rips_ai session-result --card-value VALUE")
+        print("  python -m rips_ai session-screen /path/to/result.png --state result")
+        print("after advice: use the sell or vault branch below, then verify bank")
+        return 0
+
+    print(f"pending card: {cents_to_dollars(pending.card_value_cents)}")
+    if pending.advised_action == "sell":
+        print("stage: waiting_for_sell_buyback")
+        print("next: verify the buyback sheet before accepting")
+        print(
+            "  python -m rips_ai session-buyback "
+            f"--amount {cents_to_dollars(pending.expected_buyback_cents or pending.card_value_cents)}"
+        )
+        print("after accepting in app:")
+        print(
+            "  python -m rips_ai session-buyback "
+            f"--amount {cents_to_dollars(pending.expected_buyback_cents or pending.card_value_cents)} --commit"
+        )
+        print("then diagnose visible bank:")
+        print("  python -m rips_ai session-bank-check --bank VALUE")
+        return 0
+    if pending.advised_action == "vault":
+        print("stage: waiting_for_vault_commit")
+        print("next: after tapping Vault in app, commit the pending vault")
+        print("  python -m rips_ai session-vault")
+        print("then diagnose visible bank and periodically audit vault gallery:")
+        print("  python -m rips_ai session-bank-check --bank VALUE")
+        print("  python -m rips_ai session-vault-audit --card-values VALUE...")
+        return 0
+
+    print("stage: result_value_recorded_without_action")
+    print("next: rerun result advice from the recorded value")
+    print(f"  python -m rips_ai session-result --card-value {cents_to_dollars(pending.card_value_cents)}")
     return 0
 
 
@@ -1646,6 +1752,7 @@ def main(argv: list[str] | None = None) -> int:
         "classify-screen": command_classify_screen,
         "session-start": command_session_start,
         "session-status": command_session_status,
+        "session-workflow": command_session_workflow,
         "session-bank-check": command_session_bank_check,
         "session-vault-audit": command_session_vault_audit,
         "session-recommend": command_session_recommend,

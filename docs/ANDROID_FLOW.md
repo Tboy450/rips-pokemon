@@ -58,6 +58,29 @@ Screen size in the sample: `1080x2340` portrait.
 
 ## Sample Commands
 
+State-aware workflow command:
+
+```bash
+python -m rips_ai session-workflow
+```
+
+Use this as the first command after any interruption, Shizuku outage, app
+gesture, result screen, sell/buyback action, or vault action. It reads
+`data/live_session.json` and prints the next stage-specific commands instead of
+requiring the operator to remember the full flow. It includes bank diagnosis
+and vault gallery audit steps as part of the active workflow.
+
+The intended loop is:
+
+1. Run `session-workflow`.
+2. Verify visible bank with `session-bank-check` if the app is on a trusted
+   screen.
+3. If no pack is pending, use the recommended pack/open command it prints.
+4. If a pack is pending, resolve the result, buyback, or vault branch it prints.
+5. Run `session-bank-check` after resolution.
+6. Run `device-vault-gallery-plan` plus `session-vault-audit` periodically or
+   whenever tracked vault totals look wrong.
+
 Read a result screen and decide against a known vault:
 
 ```bash

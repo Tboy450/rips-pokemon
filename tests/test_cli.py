@@ -621,6 +621,122 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertEqual(loaded.vault_count, 3)
         self.assertEqual(loaded.history[-1]["type"], "vault_audit")
 
+    def test_session_workflow_ready_includes_bank_and_vault_checks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "13",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "session-workflow",
+                        "--session",
+                        str(session),
+                        "--config",
+                        str(config),
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        text = output.getvalue()
+        self.assertIn("stage: ready_for_bank_check_and_pack_choice", text)
+        self.assertIn("session-bank-check --bank VALUE", text)
+        self.assertIn("session-vault-audit --card-values VALUE", text)
+        self.assertIn("device-open-pack --pack one_dollar --confirmed-buy-screen", text)
+
+    def test_session_workflow_pending_sell_includes_buyback_and_bank_check(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "13",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    main(
+                        [
+                            "session-buy",
+                            "--session",
+                            str(session),
+                            "--config",
+                            str(config),
+                            "--pack",
+                            "one_dollar",
+                            "--purchase-confirmed",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    main(
+                        [
+                            "session-result",
+                            "--session",
+                            str(session),
+                            "--card-value",
+                            "0.50",
+                        ]
+                    ),
+                    0,
+                )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "session-workflow",
+                        "--session",
+                        str(session),
+                        "--config",
+                        str(config),
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        text = output.getvalue()
+        self.assertIn("stage: waiting_for_sell_buyback", text)
+        self.assertIn("session-buyback --amount $0.50 --commit", text)
+        self.assertIn("session-bank-check --bank VALUE", text)
+
     def test_device_vault_gallery_plan_prints_card_points(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             flow = Path(temp_dir) / "flow.json"

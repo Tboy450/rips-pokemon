@@ -93,6 +93,16 @@ Show tracked state:
 python -m rips_ai session-status
 ```
 
+Print the active workflow for the current tracked state:
+
+```bash
+python -m rips_ai session-workflow
+```
+
+Use this after compaction, Shizuku failure, app interruption, or any Rips action.
+It prints the next stage-specific commands and includes the active bank
+diagnosis and vault audit checkpoints.
+
 Recommend the next pack from placeholder pack data:
 
 ```bash
