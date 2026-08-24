@@ -126,16 +126,18 @@ Use one screenshot and let the tool classify the current Rips screen:
 python -m rips_ai session-screen /path/to/screenshot.png
 ```
 
-On a pack screen, mark the buy as pending only after you actually buy the pack in the app:
+On a pack screen, the tool only advises by default:
 
 ```bash
-python -m rips_ai session-screen /path/to/pack.png --pack two_fifty --commit
+python -m rips_ai session-screen /path/to/pack.png --pack one_dollar
 ```
 
-After you actually buy/open a pack in the app, mark it pending:
+After you actually buy/open a pack in the app and the app accepts the action,
+mark it pending with the explicit confirmation flag:
 
 ```bash
-python -m rips_ai session-buy --pack two_fifty
+python -m rips_ai session-buy --pack one_dollar --purchase-confirmed
+python -m rips_ai session-screen /path/to/pack.png --pack one_dollar --commit --purchase-confirmed
 ```
 
 On the result screen, read the screenshot or enter the card value:
@@ -173,7 +175,33 @@ python -m rips_ai device-capture
 python -m rips_ai device-advise --state result --pack-price 1.00
 ```
 
+Open one live pack through the calibrated Shizuku gesture flow only when the
+main buy screen is visible:
+
+```bash
+python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
+```
+
+This taps the lower `Buy for $1` button, spins the post-buy picker carousel,
+selects the centered pack, performs the stronger slice/reveal swipes, updates
+the session to pending, and returns to Codex by default.
+
 If `device-capture` times out, Android is still blocking Codex to Shizuku communication. Set both apps to unrestricted battery usage and confirm Shizuku service is running.
+
+## Next Best Upgrade Steps
+
+1. Fix Android screenshot readback so `device-capture` produces a locally
+   readable, CRC-valid PNG without hanging on Shizuku chunk reads.
+2. Add screen-state verification before every gesture step, especially
+   distinguishing the main pack carousel from the `What's inside` carousel and
+   the post-buy pack picker.
+3. Add a result-screen loop that waits for the revealed card value, advises
+   `sell` or `vault`, then keeps the session pending until the user confirms
+   the in-app action.
+4. Add a buyback confirmation flow that verifies the offer amount before
+   accepting or committing bank changes.
+5. Start logging every real pull to `data/outcomes.jsonl`, then export an
+   observed pack config once there are enough samples to replace demo odds.
 
 ## Important Assumption
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rips_ai.cli import main
 from rips_ai.ledger import load_ledger_records
+from rips_ai.session import load_live_session
 
 
 class CliSessionLedgerTests(unittest.TestCase):
@@ -176,6 +177,102 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("$2.50 pack unlocks at $15.00 bank", stderr.getvalue())
 
+    def test_session_buy_without_purchase_confirmation_does_not_mutate_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "13",
+                            "--vault",
+                            "7.10",
+                            "--vault-count",
+                            "3",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "session-buy",
+                        "--session",
+                        str(session),
+                        "--config",
+                        str(config),
+                        "--pack",
+                        "one_dollar",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1300)
+        self.assertIsNone(loaded.pending)
+        self.assertIn("--purchase-confirmed", output.getvalue())
+
+    def test_session_screen_pack_commit_requires_purchase_confirmation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "13",
+                            "--vault",
+                            "7.10",
+                            "--vault-count",
+                            "3",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "session-screen",
+                        str(root / "pack.png"),
+                        "--session",
+                        str(session),
+                        "--config",
+                        str(config),
+                        "--state",
+                        "pack",
+                        "--pack",
+                        "one_dollar",
+                        "--commit",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1300)
+        self.assertIsNone(loaded.pending)
+        self.assertIn("--purchase-confirmed", output.getvalue())
+
     def test_session_plan_reports_weighted_one_dollar_probability(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -288,6 +385,7 @@ class CliSessionLedgerTests(unittest.TestCase):
                             str(config),
                             "--pack",
                             "one_dollar",
+                            "--purchase-confirmed",
                         ]
                     ),
                     0,

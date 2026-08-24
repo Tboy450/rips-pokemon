@@ -18,14 +18,19 @@ Screen size in the sample: `1080x2340` portrait.
 3. `pack_picker`
    - Shows `Tap to select a pack to open`.
    - Tap the centered pack after this state appears.
+   - Do not use this center tap on the main pack carousel; it can open the
+     `What's inside` carousel instead of buying/opening.
 
 4. `pack_slice`
    - The selected pack fills the screen.
-   - Use a left-to-right or right-to-left horizontal swipe across the pack.
+   - Use a full-width left-to-right or right-to-left horizontal swipe across
+     the pack. A short swipe can leave the pack unopened.
+   - Follow with a second faster full-width horizontal swipe about `0.35s`
+     later to spin/reveal the card.
 
 5. `reveal_animation`
    - Fireworks/card spin.
-   - A delayed swipe can speed up reveal, but no decision is made here.
+   - The quick follow-up swipe can speed up reveal, but no decision is made here.
 
 6. `card_result`
    - Shows the revealed card, large value, card name, `Sell`, and `Vault`.
@@ -77,7 +82,7 @@ Track a real live run from the current app values:
 ```bash
 python -m rips_ai session-start --bank 14 --vault 0 --min-bank 10 --force
 python -m rips_ai session-recommend
-python -m rips_ai session-buy --pack two_fifty
+python -m rips_ai session-buy --pack two_fifty --purchase-confirmed
 python -m rips_ai session-result --image analysis_frames/time_020.jpg --rarity-hint "blue flashes"
 python -m rips_ai session-buyback --image analysis_frames/time_022.jpg --commit
 ```
@@ -85,10 +90,15 @@ python -m rips_ai session-buyback --image analysis_frames/time_022.jpg --commit
 Short screenshot workflow:
 
 ```bash
-python -m rips_ai session-screen analysis_frames/time_001.jpg --pack two_fifty --commit
+python -m rips_ai session-screen analysis_frames/time_001.jpg --pack two_fifty
+python -m rips_ai session-screen analysis_frames/time_001.jpg --pack two_fifty --commit --purchase-confirmed
 python -m rips_ai session-screen analysis_frames/time_020.jpg --rarity-hint "blue flashes"
 python -m rips_ai session-screen analysis_frames/time_022.jpg --commit
 ```
+
+Pack-screen `--commit` requires `--purchase-confirmed`; this keeps screenshot
+tests and stale pack screens from deducting bank or creating a pending pack
+before the app has accepted the buy/open step.
 
 `session-buyback` only changes tracked bank when `--commit` is supplied. This keeps the tracker from moving forward before the app action is actually accepted. Committed outcomes are logged to `data/outcomes.jsonl` by default.
 
@@ -100,3 +110,14 @@ python -m rips_ai device-advise --state pack --pack-price 2.50 --min-bank 10
 python -m rips_ai device-advise --state result --pack-price 1.00
 python -m rips_ai device-advise --state buyback --expected-sell 0.30
 ```
+
+Live open path:
+
+```bash
+python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
+```
+
+Use this only when the main pack buy screen is visible. It taps the lower
+orange buy button, spins the post-buy picker carousel once, taps the centered
+pack, performs the calibrated long slice plus fast follow-up swipe, updates the
+session to pending, and returns to Codex unless `--stay-in-rips` is supplied.

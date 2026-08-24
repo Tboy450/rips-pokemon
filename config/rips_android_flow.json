@@ -8,71 +8,251 @@
   "safety": {
     "mode": "advisor_first",
     "cash_floor_cents": 1000,
-    "allowed_pack_prices_cents": [100, 250],
+    "allowed_pack_prices_cents": [
+      100,
+      250
+    ],
     "require_manual_purchase_confirmation": true
   },
   "states": [
     {
       "id": "pack_carousel",
-      "markers": ["Pokemon", "Buy for $", "What's inside"],
-      "reads": ["bank", "buy_button"],
-      "actions": ["swipe_pack_left", "swipe_pack_right", "tap_pack_style", "tap_buy"]
+      "markers": [
+        "Pokemon",
+        "Buy for $",
+        "What's inside"
+      ],
+      "reads": [
+        "bank",
+        "buy_button"
+      ],
+      "actions": [
+        "swipe_pack_left",
+        "swipe_pack_right",
+        "tap_pack_style",
+        "tap_buy"
+      ]
     },
     {
       "id": "pack_style_sheet",
-      "markers": ["Estimated Payout Odds", "Apply"],
-      "reads": ["bank"],
-      "actions": ["choose_normal", "choose_high", "apply_pack_style"]
+      "markers": [
+        "Estimated Payout Odds",
+        "Apply"
+      ],
+      "reads": [
+        "bank"
+      ],
+      "actions": [
+        "choose_normal",
+        "choose_high",
+        "apply_pack_style"
+      ]
     },
     {
       "id": "pack_picker",
-      "markers": ["Tap to select a pack to open"],
-      "actions": ["tap_center_pack"]
+      "markers": [
+        "Tap to select a pack to open"
+      ],
+      "actions": [
+        "spin_picker_left",
+        "spin_picker_right",
+        "tap_center_pack"
+      ]
     },
     {
       "id": "pack_slice",
-      "markers": ["selected pack fills screen"],
-      "actions": ["slice_left_to_right", "slice_right_to_left"]
+      "markers": [
+        "selected pack fills screen"
+      ],
+      "actions": [
+        "slice_left_to_right",
+        "slice_right_to_left"
+      ]
     },
     {
       "id": "reveal_animation",
-      "markers": ["fireworks", "card spin"],
-      "actions": ["speed_up_reveal_swipe"],
+      "markers": [
+        "fireworks",
+        "card spin"
+      ],
+      "actions": [
+        "speed_up_reveal_swipe"
+      ],
       "wait_for": "card_result"
     },
     {
       "id": "card_result",
-      "markers": ["Sell", "Vault", "large card value"],
-      "reads": ["revealed_card_value"],
-      "actions": ["tap_sell", "tap_vault"]
+      "markers": [
+        "Sell",
+        "Vault",
+        "large card value"
+      ],
+      "reads": [
+        "revealed_card_value"
+      ],
+      "actions": [
+        "tap_sell",
+        "tap_vault"
+      ]
     },
     {
       "id": "buyback_sheet",
-      "markers": ["Accept Buyback Offer", "Buyback offer", "Accept"],
-      "reads": ["buyback_offer"],
-      "actions": ["tap_accept_buyback"]
+      "markers": [
+        "Accept Buyback Offer",
+        "Buyback offer",
+        "Accept"
+      ],
+      "reads": [
+        "buyback_offer"
+      ],
+      "actions": [
+        "tap_accept_buyback"
+      ]
     },
     {
       "id": "collection",
-      "markers": ["My Collection", "Price"],
-      "reads": ["visible_card_values"],
+      "markers": [
+        "My Collection",
+        "Price"
+      ],
+      "reads": [
+        "visible_card_values"
+      ],
       "note": "Use as a periodic cross-check. The strategy should primarily track vault value internally after each sell/vault decision."
     }
   ],
   "gestures": {
-    "swipe_pack_left": { "from": [760, 830], "to": [300, 830], "duration_ms": 400 },
-    "swipe_pack_right": { "from": [300, 830], "to": [760, 830], "duration_ms": 400 },
-    "tap_pack_style": { "at": [810, 1660] },
-    "tap_buy": { "at": [540, 1910] },
-    "choose_normal": { "at": [410, 810] },
-    "choose_high": { "at": [670, 810] },
-    "apply_pack_style": { "at": [540, 2060] },
-    "tap_center_pack": { "at": [540, 1220] },
-    "slice_left_to_right": { "from": [300, 1240], "to": [780, 1240], "duration_ms": 350 },
-    "slice_right_to_left": { "from": [780, 1240], "to": [300, 1240], "duration_ms": 350 },
-    "speed_up_reveal_swipe": { "from": [540, 1660], "to": [540, 880], "duration_ms": 350, "delay_ms": 1000 },
-    "tap_sell": { "at": [280, 2110] },
-    "tap_vault": { "at": [760, 2110] },
-    "tap_accept_buyback": { "at": [540, 2010] }
+    "swipe_pack_left": {
+      "from": [
+        760,
+        830
+      ],
+      "to": [
+        300,
+        830
+      ],
+      "duration_ms": 400
+    },
+    "swipe_pack_right": {
+      "from": [
+        300,
+        830
+      ],
+      "to": [
+        760,
+        830
+      ],
+      "duration_ms": 400
+    },
+    "tap_pack_style": {
+      "at": [
+        810,
+        1660
+      ]
+    },
+    "tap_buy": {
+      "at": [
+        540,
+        1950
+      ]
+    },
+    "choose_normal": {
+      "at": [
+        410,
+        810
+      ]
+    },
+    "choose_high": {
+      "at": [
+        670,
+        810
+      ]
+    },
+    "apply_pack_style": {
+      "at": [
+        540,
+        2060
+      ]
+    },
+    "spin_picker_left": {
+      "from": [
+        820,
+        1220
+      ],
+      "to": [
+        260,
+        1220
+      ],
+      "duration_ms": 600
+    },
+    "spin_picker_right": {
+      "from": [
+        260,
+        1220
+      ],
+      "to": [
+        820,
+        1220
+      ],
+      "duration_ms": 600
+    },
+    "tap_center_pack": {
+      "at": [
+        540,
+        1220
+      ]
+    },
+    "slice_left_to_right": {
+      "from": [
+        60,
+        1240
+      ],
+      "to": [
+        1020,
+        1240
+      ],
+      "duration_ms": 700
+    },
+    "slice_right_to_left": {
+      "from": [
+        1020,
+        1240
+      ],
+      "to": [
+        60,
+        1240
+      ],
+      "duration_ms": 700
+    },
+    "speed_up_reveal_swipe": {
+      "from": [
+        60,
+        1320
+      ],
+      "to": [
+        1020,
+        1320
+      ],
+      "duration_ms": 250,
+      "delay_ms": 350
+    },
+    "tap_sell": {
+      "at": [
+        280,
+        2110
+      ]
+    },
+    "tap_vault": {
+      "at": [
+        760,
+        2110
+      ]
+    },
+    "tap_accept_buyback": {
+      "at": [
+        540,
+        2010
+      ]
+    }
   }
 }

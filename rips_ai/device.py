@@ -9,7 +9,7 @@ import subprocess
 import zlib
 from pathlib import Path
 
-READ_CHUNK_BYTES = 16 * 1024
+READ_CHUNK_BYTES = 32 * 1024
 BASE64_CHARS_RE = re.compile(r"[A-Za-z0-9+/=]")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -34,6 +34,29 @@ def _run_shizuku_text(
         )
     except subprocess.TimeoutExpired as exc:
         raise DeviceAccessError("Shizuku timed out while reading the captured screenshot.") from exc
+
+
+def run_shizuku_shell(command: str, timeout_seconds: int = 30) -> str:
+    shizuku = shutil.which("shizuku")
+    if shizuku is None:
+        raise DeviceAccessError("shizuku command is not available")
+
+    try:
+        completed = subprocess.run(
+            [shizuku, "sh", "-c", command],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise DeviceAccessError("Shizuku timed out while running Android UI actions.") from exc
+
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or completed.stdout.strip()
+        raise DeviceAccessError(message or "Shizuku command failed")
+    return "\n".join(part for part in (completed.stdout.strip(), completed.stderr.strip()) if part)
 
 
 def _read_remote_file(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import shlex
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from .core import (
     round_to_record,
     run_session,
 )
-from .device import DeviceAccessError, capture_screenshot
+from .device import DeviceAccessError, capture_screenshot, run_shizuku_shell
 from .ledger import (
     append_ledger_record,
     build_observed_pack_config,
@@ -52,6 +53,7 @@ from .session import (
 DEFAULT_CONFIG = Path("config/packs.example.json")
 DEFAULT_SESSION = Path("data/live_session.json")
 DEFAULT_LEDGER = Path("data/outcomes.jsonl")
+DEFAULT_FLOW = Path("config/rips_android_flow.json")
 DEFAULT_TWO_FIFTY_BANK = "15.00"
 
 
@@ -227,6 +229,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TWO_FIFTY_BANK,
         help="bank threshold that unlocks $2.50 packs",
     )
+    session_buy.add_argument(
+        "--purchase-confirmed",
+        action="store_true",
+        help=(
+            "confirm the in-app buy/open step has already completed before "
+            "deducting bank or starting a pending pack"
+        ),
+    )
 
     session_result = subparsers.add_parser(
         "session-result",
@@ -291,6 +301,60 @@ def build_parser() -> argparse.ArgumentParser:
         "--commit",
         action="store_true",
         help="commit the advised app action after you have performed it",
+    )
+    session_screen.add_argument(
+        "--purchase-confirmed",
+        action="store_true",
+        help=(
+            "required with --commit on pack screens after the in-app buy/open "
+            "step has already completed"
+        ),
+    )
+
+    device_open = subparsers.add_parser(
+        "device-open-pack",
+        help="run the calibrated Android buy/open gesture sequence through Shizuku",
+    )
+    device_open.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+    device_open.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    device_open.add_argument("--flow", type=Path, default=DEFAULT_FLOW)
+    device_open.add_argument("--pack", default="one_dollar", help="pack id from config")
+    device_open.add_argument(
+        "--two-fifty-bank",
+        default=DEFAULT_TWO_FIFTY_BANK,
+        help="bank threshold that unlocks $2.50 packs",
+    )
+    device_open.add_argument(
+        "--confirmed-buy-screen",
+        action="store_true",
+        help="required; confirms Rips is on the main pack buy screen, not What's inside",
+    )
+    device_open.add_argument(
+        "--stay-in-rips",
+        action="store_true",
+        help="leave Rips foreground after gestures instead of returning to Codex",
+    )
+    device_open.add_argument(
+        "--picker-spin",
+        choices=("left", "right", "both", "none"),
+        default="left",
+        help="post-buy picker carousel spin before tapping the centered pack",
+    )
+    device_open.add_argument(
+        "--activity",
+        default="com.triumpharcade.tcg/.MainActivity",
+        help="Rips Android activity to launch",
+    )
+    device_open.add_argument(
+        "--return-package",
+        default="codex.app",
+        help="package to bring foreground after gestures unless --stay-in-rips is used",
+    )
+    device_open.add_argument(
+        "--timeout",
+        type=int,
+        default=30,
+        help="maximum seconds for the Shizuku gesture sequence",
     )
 
     device_capture = subparsers.add_parser(
@@ -666,6 +730,7 @@ def _print_pack_projection(
     session: LiveSession,
     pack,
     two_fifty_bank_cents: int | None = None,
+    include_action: bool = True,
 ) -> None:
     projection = project_pack_open(
         bank_cents=session.bank_cents,
@@ -680,7 +745,8 @@ def _print_pack_projection(
         locked_reason = _pack_unlock_reason(session, pack, two_fifty_bank_cents)
         if locked_reason is not None:
             print("mode: $1 fallback")
-            print("action: use $1 pack")
+            if include_action:
+                print("action: use $1 pack")
             print(f"reason: {locked_reason}")
             print("projection if opened anyway:")
     if not projection.can_buy:
@@ -692,8 +758,8 @@ def _print_pack_projection(
         )
         return
 
-    if locked_reason is None:
-        print("action: open manually if you accept the risk")
+    if locked_reason is None and include_action:
+        print("action: buy/open manually if you accept the risk")
     print(f"bank after buy: {cents_to_dollars(projection.bank_after_buy_cents)}")
     print(f"expected card value: {cents_to_dollars(round(projection.expected_card_value_cents))}")
     print(f"expected card profit: {cents_to_dollars(round(projection.expected_card_profit_cents))}")
@@ -831,6 +897,12 @@ def command_session_buy(args: argparse.Namespace) -> int:
         if locked_reason is not None:
             raise ValueError(locked_reason)
         _print_pack_projection(session, pack, two_fifty_bank)
+        if not args.purchase_confirmed:
+            print(
+                "next: buy/open the pack in the app, then rerun this command "
+                "with --purchase-confirmed"
+            )
+            return 0
         begin_pending_pack(session, pack.id, pack.price_cents)
     except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
@@ -838,6 +910,7 @@ def command_session_buy(args: argparse.Namespace) -> int:
 
     save_live_session(args.session, session)
     print(f"pending pack: {pack.name} ({pack.id})")
+    print("confirmed: in-app buy/open step was already completed")
     print(f"bank after buy: {cents_to_dollars(session.bank_cents)}")
     return 0
 
@@ -1004,14 +1077,32 @@ def _handle_session_pack_screen(args: argparse.Namespace, session: LiveSession) 
         )
         return 0
 
-    print(f"action: buy {pack.name} ({pack.id})")
-    _print_pack_projection(session, pack, two_fifty_bank)
+    if args.commit and not args.purchase_confirmed:
+        print(f"candidate: buy/open {pack.name} ({pack.id}) manually")
+    else:
+        print(f"action: buy/open {pack.name} ({pack.id}) manually")
+    _print_pack_projection(session, pack, two_fifty_bank, include_action=False)
     if args.commit:
+        if not args.purchase_confirmed:
+            print("action: wait")
+            print(
+                "reason: --purchase-confirmed is required before deducting "
+                "bank or starting a pending pack"
+            )
+            print(
+                "next: after the app accepts the buy/open step, rerun with "
+                f"--commit --purchase-confirmed --pack {pack.id}"
+            )
+            return 0
         begin_pending_pack(session, pack.id, pack.price_cents)
         save_live_session(args.session, session)
-        print("committed: pending pack started")
+        print("committed: pending pack started after confirmed in-app buy/open")
     else:
-        print(f"next: buy in app, then run session-screen {args.image} --state pack --pack {pack.id} --commit")
+        print(
+            "next: buy/open in app, then run "
+            f"session-screen {args.image} --state pack --pack {pack.id} "
+            "--commit --purchase-confirmed"
+        )
     return 0
 
 
@@ -1072,6 +1163,133 @@ def _handle_session_buyback_screen(args: argparse.Namespace, session: LiveSessio
     return 0
 
 
+def _load_flow(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _gesture(flow: dict[str, object], name: str) -> dict[str, object]:
+    gestures = flow.get("gestures", {})
+    if not isinstance(gestures, dict) or name not in gestures:
+        raise ValueError(f"gesture {name!r} was not found in {DEFAULT_FLOW}")
+    item = gestures[name]
+    if not isinstance(item, dict):
+        raise ValueError(f"gesture {name!r} is not an object")
+    return item
+
+
+def _point(value: object, gesture_name: str) -> tuple[int, int]:
+    if (
+        not isinstance(value, list | tuple)
+        or len(value) != 2
+    ):
+        raise ValueError(f"gesture {gesture_name!r} has an invalid point")
+    return int(value[0]), int(value[1])
+
+
+def _tap_command(flow: dict[str, object], name: str) -> str:
+    gesture = _gesture(flow, name)
+    x, y = _point(gesture.get("at"), name)
+    return f"input tap {x} {y}"
+
+
+def _swipe_command(flow: dict[str, object], name: str) -> str:
+    gesture = _gesture(flow, name)
+    start_x, start_y = _point(gesture.get("from"), name)
+    end_x, end_y = _point(gesture.get("to"), name)
+    duration = int(gesture.get("duration_ms", 300))
+    return f"input swipe {start_x} {start_y} {end_x} {end_y} {duration}"
+
+
+def _open_pack_sequence(
+    flow: dict[str, object],
+    activity: str,
+    return_package: str,
+    stay_in_rips: bool,
+    picker_spin: str,
+) -> str:
+    commands = [
+        f"am start -n {shlex.quote(activity)} >/dev/null",
+        "sleep 1",
+        _tap_command(flow, "tap_buy"),
+        "sleep 3",
+    ]
+    if picker_spin in {"left", "both"}:
+        commands.extend([_swipe_command(flow, "spin_picker_left"), "sleep 0.8"])
+    if picker_spin in {"right", "both"}:
+        commands.extend([_swipe_command(flow, "spin_picker_right"), "sleep 0.8"])
+    commands.extend(
+        [
+            _tap_command(flow, "tap_center_pack"),
+            "sleep 0.8",
+            _swipe_command(flow, "slice_left_to_right"),
+            f"sleep {_gesture(flow, 'speed_up_reveal_swipe').get('delay_ms', 350) / 1000:.2f}",
+            _swipe_command(flow, "speed_up_reveal_swipe"),
+            "sleep 5",
+        ]
+    )
+    if not stay_in_rips:
+        commands.extend(
+            [
+                f"monkey -p {shlex.quote(return_package)} 1 >/dev/null",
+                "sleep 1",
+            ]
+        )
+    commands.append(
+        "dumpsys window | grep -E \"mCurrentFocus|mFocusedApp\" | head -n 5"
+    )
+    return "; ".join(commands)
+
+
+def command_device_open_pack(args: argparse.Namespace) -> int:
+    if not args.confirmed_buy_screen:
+        print("action: wait")
+        print("reason: --confirmed-buy-screen is required before tapping Buy")
+        return 0
+
+    try:
+        session = _load_session(args.session)
+        if session.pending is not None:
+            raise ValueError("finish the pending pack before buying another")
+
+        pack = find_pack(load_packs(args.config), args.pack)
+        two_fifty_bank = dollars_to_cents(args.two_fifty_bank)
+        locked_reason = _pack_unlock_reason(session, pack, two_fifty_bank)
+        if locked_reason is not None:
+            raise ValueError(locked_reason)
+        if session.bank_cents - pack.price_cents < session.min_bank_cents:
+            raise ValueError(
+                "buying would leave "
+                f"{cents_to_dollars(session.bank_cents - pack.price_cents)}, below floor "
+                f"{cents_to_dollars(session.min_bank_cents)}"
+            )
+
+        flow = _load_flow(args.flow)
+        command = _open_pack_sequence(
+            flow=flow,
+            activity=args.activity,
+            return_package=args.return_package,
+            stay_in_rips=args.stay_in_rips,
+            picker_spin=args.picker_spin,
+        )
+        output = run_shizuku_shell(command, timeout_seconds=args.timeout)
+        begin_pending_pack(session, pack.id, pack.price_cents)
+        save_live_session(args.session, session)
+    except (FileNotFoundError, DeviceAccessError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    print(f"opened: {pack.name} ({pack.id})")
+    print(f"bank after buy: {cents_to_dollars(session.bank_cents)}")
+    print(f"pending: {pack.id} at {cents_to_dollars(pack.price_cents)}")
+    if args.stay_in_rips:
+        print("foreground: Rips requested")
+    else:
+        print(f"foreground: returned to {args.return_package}")
+    if output:
+        print(output)
+    return 0
+
+
 def command_device_capture(args: argparse.Namespace) -> int:
     try:
         path = capture_screenshot(args.output, args.remote_path)
@@ -1126,6 +1344,7 @@ def main(argv: list[str] | None = None) -> int:
         "session-buyback": command_session_buyback,
         "session-vault": command_session_vault,
         "session-screen": command_session_screen,
+        "device-open-pack": command_device_open_pack,
         "device-capture": command_device_capture,
         "device-advise": command_device_advise,
     }

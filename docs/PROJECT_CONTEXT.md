@@ -19,7 +19,9 @@ The current implementation is advisor-first. It should not tap purchases automat
 
 ## Current Strategy Rules
 
-- Buying a pack immediately deducts its price from tracked bank.
+- A pack buy only deducts tracked bank after the command includes explicit
+  `--purchase-confirmed`, meaning the in-app buy/open step was already
+  accepted.
 - A buy is blocked if it would put bank below the cash floor.
 - A result screen creates one pending decision:
   - `vault` if card value is greater than the pack cost.
@@ -38,17 +40,18 @@ The current implementation is advisor-first. It should not tap purchases automat
 At the time this context was written, the local working session was:
 
 ```text
-bank: $13.00
-vault: $7.10
-vault cards: 3
+bank: $10.00
+vault: $8.90
+vault cards: 5
 cash floor: $10.00
-pending: none
+pending: one_dollar at $1.00
 ```
 
 Recreate that state on a new device with:
 
 ```bash
-python -m rips_ai session-start --bank 13 --vault 7.10 --vault-count 3 --min-bank 10 --force
+python -m rips_ai session-start --bank 11 --vault 8.90 --vault-count 5 --min-bank 10 --force
+python -m rips_ai session-buy --pack one_dollar --purchase-confirmed
 ```
 
 If the real app state has changed, start with the current real bank and vault instead.
@@ -106,7 +109,8 @@ python -m rips_ai session-recommend --two-fifty-bank 15
 Use a screenshot-first workflow:
 
 ```bash
-python -m rips_ai session-screen /path/to/pack.png --pack two_fifty --commit
+python -m rips_ai session-screen /path/to/pack.png --pack two_fifty
+python -m rips_ai session-screen /path/to/pack.png --pack two_fifty --commit --purchase-confirmed
 python -m rips_ai session-screen /path/to/result.png --rarity-hint "blue flashes"
 python -m rips_ai session-screen /path/to/buyback.png --commit
 ```
@@ -114,10 +118,20 @@ python -m rips_ai session-screen /path/to/buyback.png --commit
 Use manual values when OCR is not available or not trusted:
 
 ```bash
-python -m rips_ai session-buy --pack two_fifty
+python -m rips_ai session-buy --pack two_fifty --purchase-confirmed
 python -m rips_ai session-result --card-value 0.30 --rarity-hint "blue flashes"
 python -m rips_ai session-buyback --amount 0.30 --commit
 ```
+
+Use the calibrated live Shizuku flow only when the main buy screen is visible:
+
+```bash
+python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
+```
+
+It taps the lower orange buy button, spins the post-buy picker carousel once,
+selects the centered pack, performs the long slice plus fast follow-up swipe,
+marks the session pending, and returns to Codex by default.
 
 Use `python -m rips_ai analyze-ledger` to summarize observed card values,
 observed profit, and sell/vault counts by pack.
@@ -155,11 +169,22 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
 
 ## What To Improve Next
 
-1. Collect enough real outcomes in `data/outcomes.jsonl`, then export `data/packs.observed.json`.
-2. Recalibrate OCR regions if the target device resolution differs from `1080x2340`.
-3. Add collection-screen cross-checks to verify the tracked vault value.
-4. Make `device-capture` plus `session-screen` the standard live loop once Shizuku is stable.
-5. Only after the advisor is reliable, consider guarded tap/swipe assistance for non-purchase gestures.
+1. Make Android screenshot readback reliable. The Shizuku wrapper can corrupt
+   raw PNG streams, and chunked base64 readback can hang mid-file, so
+   `device-capture` needs a faster validated transfer path.
+2. Add screen-state verification before gestures. The assistant must
+   distinguish the main pack carousel, the `What's inside` carousel, the
+   post-buy picker carousel, the slice screen, the result screen, and buyback
+   sheets before tapping.
+3. Convert `device-open-pack` into a state-machine flow: tap the lower buy
+   button, wait for the post-buy picker, spin once, select the centered pack,
+   slice with the long swipe plus fast follow-up, then wait for result.
+4. Add a result/buyback loop that reads the card value, advises `sell` or
+   `vault`, and only commits after the in-app action is confirmed.
+5. Add collection-screen cross-checks to verify tracked vault value and card
+   count after vault actions.
+6. Collect enough real outcomes in `data/outcomes.jsonl`, then export
+   `data/packs.observed.json` to replace placeholder pack odds.
 
 ## Safety Direction
 
