@@ -107,7 +107,19 @@ next steps without mutating unless complete trusted totals are supplied with
 
 Use this after compaction, Shizuku failure, app interruption, or any Rips action.
 It prints the next stage-specific commands and includes the active bank
-diagnosis and vault audit checkpoints.
+diagnosis and vault audit checkpoints. The first workflow step must be screen
+anchoring before any gesture:
+
+```bash
+python -m rips_ai device-capture --output data/latest_screen.png
+python -m rips_ai classify-screen data/latest_screen.png
+```
+
+If capture is unavailable, use what is visible on the device:
+
+```bash
+python -m rips_ai session-diagnose --screen-state STATE --bank VALUE --vault VALUE --vault-count COUNT
+```
 
 Recommend the next pack from placeholder pack data:
 

@@ -889,6 +889,10 @@ class CliSessionLedgerTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         text = output.getvalue()
+        self.assertIn("first: capture or confirm the visible Rips screen", text)
+        self.assertIn("device-capture --output data/latest_screen.png", text)
+        self.assertIn("classify-screen data/latest_screen.png", text)
+        self.assertIn("session-diagnose --screen-state STATE", text)
         self.assertIn("stage: ready_for_bank_check_and_pack_choice", text)
         self.assertIn("session-bank-check --bank VALUE", text)
         self.assertIn("session-vault-audit --card-values VALUE", text)

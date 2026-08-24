@@ -109,7 +109,19 @@ python -m rips_ai session-recommend
 and prints the next commands for the current stage, including bank diagnosis,
 vault gallery audit, pending result handling, sell buyback verification, or
 vault commit. Use it after any interruption or Shizuku failure before touching
-Rips again.
+Rips again. The first workflow checkpoint is always screen anchoring:
+
+```bash
+python -m rips_ai device-capture --output data/latest_screen.png
+python -m rips_ai classify-screen data/latest_screen.png
+```
+
+If capture is unavailable or stale, use the visible screen manually before any
+gesture:
+
+```bash
+python -m rips_ai session-diagnose --screen-state STATE --bank VALUE --vault VALUE --vault-count COUNT
+```
 
 When the app was interrupted or screenshot readback is unreliable, use a
 manual diagnosis from the visible app state:

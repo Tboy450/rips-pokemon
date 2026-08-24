@@ -1030,6 +1030,17 @@ def _print_recovery_checks() -> None:
     print("  python -m rips_ai session-vault-audit --card-values VALUE...")
 
 
+def _print_screen_checkpoint() -> None:
+    print("first: capture or confirm the visible Rips screen before any gesture")
+    print("  python -m rips_ai device-capture --output data/latest_screen.png")
+    print("  python -m rips_ai classify-screen data/latest_screen.png")
+    print("fallback if capture is unavailable:")
+    print(
+        "  python -m rips_ai session-diagnose "
+        "--screen-state STATE --bank VALUE --vault VALUE --vault-count COUNT"
+    )
+
+
 def command_session_workflow(args: argparse.Namespace) -> int:
     try:
         session = _load_session(args.session)
@@ -1039,6 +1050,7 @@ def command_session_workflow(args: argparse.Namespace) -> int:
 
     print("workflow: live session")
     _print_workflow_header(session)
+    _print_screen_checkpoint()
     if session.pending is None:
         print("stage: ready_for_bank_check_and_pack_choice")
         _print_recovery_checks()

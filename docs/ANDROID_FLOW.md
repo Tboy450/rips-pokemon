@@ -89,12 +89,18 @@ and vault gallery audit steps as part of the active workflow.
 The intended loop is:
 
 1. Run `session-workflow`.
-2. Verify visible bank with `session-bank-check` if the app is on a trusted
+2. Capture/classify the current visible screen before any gesture:
+   `device-capture --output data/latest_screen.png`, then
+   `classify-screen data/latest_screen.png`.
+3. If capture is unavailable or stale, run `session-diagnose --screen-state
+   STATE --bank VALUE --vault VALUE --vault-count COUNT` from what is visibly
+   on the device.
+4. Verify visible bank with `session-bank-check` if the app is on a trusted
    screen.
-3. If no pack is pending, use the recommended pack/open command it prints.
-4. If a pack is pending, resolve the result, buyback, or vault branch it prints.
-5. Run `session-bank-check` after resolution.
-6. Run `device-vault-gallery-plan` plus `session-vault-audit` periodically or
+5. If no pack is pending, use the recommended pack/open command it prints.
+6. If a pack is pending, resolve the result, buyback, or vault branch it prints.
+7. Run `session-bank-check` after resolution.
+8. Run `device-vault-gallery-plan` plus `session-vault-audit` periodically or
    whenever tracked vault totals look wrong.
 
 If Shizuku capture is unreliable or a tap lands on the wrong screen, diagnose
