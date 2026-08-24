@@ -18,6 +18,7 @@ class PendingPack:
     card_value_cents: int | None = None
     advised_action: Action | None = None
     expected_buyback_cents: int | None = None
+    replaced_vault_cents: int | None = None
     rarity_hint: str | None = None
 
 
@@ -26,6 +27,7 @@ class LiveSession:
     bank_cents: int
     vault_cents: int = 0
     vault_count: int = 0
+    vault_cards_cents: list[int] = field(default_factory=list)
     min_bank_cents: int = 1000
     opened_count: int = 0
     pending: PendingPack | None = None
@@ -47,10 +49,12 @@ def load_live_session(path: Path) -> LiveSession:
     raw = json.loads(path.read_text(encoding="utf-8"))
     pending = raw.get("pending")
     vault_cents = int(raw.get("vault_cents", 0))
+    vault_cards = [int(value) for value in raw.get("vault_cards_cents", [])]
     return LiveSession(
         bank_cents=int(raw["bank_cents"]),
         vault_cents=vault_cents,
         vault_count=int(raw.get("vault_count", 1 if vault_cents > 0 else 0)),
+        vault_cards_cents=vault_cards,
         min_bank_cents=int(raw.get("min_bank_cents", 1000)),
         opened_count=int(raw.get("opened_count", 0)),
         pending=PendingPack(**pending) if pending else None,
@@ -68,11 +72,13 @@ def start_live_session(
     vault_cents: int,
     min_bank_cents: int,
     vault_count: int = 0,
+    vault_cards_cents: list[int] | None = None,
 ) -> LiveSession:
     return LiveSession(
         bank_cents=bank_cents,
         vault_cents=vault_cents,
         vault_count=vault_count,
+        vault_cards_cents=list(vault_cards_cents or []),
         min_bank_cents=min_bank_cents,
     )
 
@@ -102,11 +108,16 @@ def commit_vault_audit(
     observed_vault_cents: int,
     observed_vault_count: int,
     source: str | None = None,
+    observed_vault_cards_cents: list[int] | None = None,
 ) -> dict[str, object]:
     previous_vault_cents = session.vault_cents
     previous_vault_count = session.vault_count
     session.vault_cents = observed_vault_cents
     session.vault_count = observed_vault_count
+    if observed_vault_cards_cents is not None:
+        session.vault_cards_cents = list(observed_vault_cards_cents)
+    else:
+        session.vault_cards_cents = []
     event = {
         "recorded_at": utc_now(),
         "type": "vault_audit",
@@ -115,6 +126,7 @@ def commit_vault_audit(
         "vault_before_count": previous_vault_count,
         "observed_vault_cents": observed_vault_cents,
         "observed_vault_count": observed_vault_count,
+        "observed_vault_cards_cents": observed_vault_cards_cents,
         "vault_delta_cents": observed_vault_cents - previous_vault_cents,
         "vault_count_delta": observed_vault_count - previous_vault_count,
         "pending_pack_id": None if session.pending is None else session.pending.pack_id,
@@ -166,6 +178,7 @@ def commit_state_reconciliation(
     session.bank_cents = observed_bank_cents
     session.vault_cents = observed_vault_cents
     session.vault_count = observed_vault_count
+    session.vault_cards_cents = []
     session.opened_count = next_opened_count
     if clear_pending:
         session.pending = None
@@ -201,14 +214,19 @@ def advise_pending_result(
     if session.pending is None:
         raise ValueError("no pending pack; run session-buy first")
 
-    action: Action = (
-        "vault"
-        if card_value_cents > session.pending.pack_price_cents
-        else "sell"
-    )
+    replaced_vault_cents = _replacement_vault_value(session, card_value_cents)
+    if session.vault_cards_cents:
+        action: Action = "vault" if replaced_vault_cents is not None else "sell"
+    else:
+        action = (
+            "vault"
+            if card_value_cents > session.pending.pack_price_cents
+            else "sell"
+        )
     session.pending.card_value_cents = card_value_cents
     session.pending.advised_action = action
     session.pending.expected_buyback_cents = card_value_cents if action == "sell" else None
+    session.pending.replaced_vault_cents = replaced_vault_cents if action == "vault" else None
     if rarity_hint is not None:
         session.pending.rarity_hint = rarity_hint
     return action
@@ -218,11 +236,48 @@ def commit_vault(session: LiveSession) -> dict[str, object]:
     pending = _require_pending_result(session, "vault")
     assert pending.card_value_cents is not None
 
-    session.vault_cents += pending.card_value_cents
-    session.vault_count += 1
-    event = _event(session, pending, "vault", 0)
+    bank_return_cents = pending.replaced_vault_cents or 0
+    if pending.replaced_vault_cents is not None:
+        _replace_vault_card(
+            session.vault_cards_cents,
+            pending.replaced_vault_cents,
+            pending.card_value_cents,
+        )
+        session.vault_cents += pending.card_value_cents - pending.replaced_vault_cents
+        session.vault_count = len(session.vault_cards_cents)
+        session.bank_cents += pending.replaced_vault_cents
+    else:
+        session.vault_cents += pending.card_value_cents
+        session.vault_count += 1
+        if session.vault_cards_cents:
+            session.vault_cards_cents.append(pending.card_value_cents)
+    event = _event(session, pending, "vault", bank_return_cents)
     _finish_pending(session, event)
     return event
+
+
+def _replacement_vault_value(
+    session: LiveSession,
+    card_value_cents: int,
+) -> int | None:
+    if not session.vault_cards_cents:
+        return None
+    highest_vault_cents = max(session.vault_cards_cents)
+    if card_value_cents > highest_vault_cents:
+        return highest_vault_cents
+    return None
+
+
+def _replace_vault_card(
+    vault_cards_cents: list[int],
+    old_value_cents: int,
+    new_value_cents: int,
+) -> None:
+    for index, value in enumerate(vault_cards_cents):
+        if value == old_value_cents:
+            vault_cards_cents[index] = new_value_cents
+            return
+    raise ValueError(f"vault card value {cents_to_dollars(old_value_cents)} was not found")
 
 
 def commit_buyback(session: LiveSession, buyback_cents: int) -> dict[str, object]:
@@ -279,6 +334,7 @@ def _event(
         "bank_before_cents": pending.bank_before_cents,
         "vault_before_cents": pending.vault_before_cents,
         "vault_count_before": pending.vault_count_before,
+        "replaced_vault_cents": pending.replaced_vault_cents,
         "bank_after_cents": session.bank_cents,
         "vault_after_cents": session.vault_cents,
         "vault_count_after": session.vault_count,

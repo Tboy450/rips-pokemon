@@ -878,6 +878,9 @@ def _print_session(session: LiveSession) -> None:
     print(f"bank: {cents_to_dollars(session.bank_cents)}")
     print(f"vault: {cents_to_dollars(session.vault_cents)}")
     print(f"vault cards: {session.vault_count}")
+    if session.vault_cards_cents:
+        values = ", ".join(cents_to_dollars(value) for value in session.vault_cards_cents)
+        print(f"vault card values: {values}")
     print(f"total tracked value: {cents_to_dollars(session.total_value_cents)}")
     print(f"cash floor: {cents_to_dollars(session.min_bank_cents)}")
     print(f"opened: {session.opened_count}")
@@ -889,6 +892,8 @@ def _print_session(session: LiveSession) -> None:
             print(f"pending card: {cents_to_dollars(session.pending.card_value_cents)}")
         if session.pending.advised_action is not None:
             print(f"pending action: {session.pending.advised_action}")
+        if session.pending.replaced_vault_cents is not None:
+            print(f"pending replaces vault card: {cents_to_dollars(session.pending.replaced_vault_cents)}")
 
 
 def _format_probability(value: float) -> str:
@@ -1318,7 +1323,7 @@ def command_session_bank_check(args: argparse.Namespace) -> int:
     return 0
 
 
-def _vault_audit_values(args: argparse.Namespace) -> tuple[int, int]:
+def _vault_audit_values(args: argparse.Namespace) -> tuple[int, int, list[int] | None]:
     value_modes = [
         bool(args.card_values),
         args.values_file is not None,
@@ -1331,22 +1336,22 @@ def _vault_audit_values(args: argparse.Namespace) -> tuple[int, int]:
 
     if args.card_values:
         values = parse_money_values(args.card_values)
-        return sum(values), len(values)
+        return sum(values), len(values), values
     if args.values_file is not None:
         values = parse_money_values([args.values_file.read_text(encoding="utf-8")])
-        return sum(values), len(values)
+        return sum(values), len(values), values
 
     if args.total is None or args.count is None:
         raise ValueError("--total requires --count")
     if args.count < 0:
         raise ValueError("--count cannot be negative")
-    return dollars_to_cents(args.total), args.count
+    return dollars_to_cents(args.total), args.count, None
 
 
 def command_session_vault_audit(args: argparse.Namespace) -> int:
     try:
         session = _load_session(args.session)
-        observed_vault, observed_count = _vault_audit_values(args)
+        observed_vault, observed_count, observed_values = _vault_audit_values(args)
     except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -1358,12 +1363,22 @@ def command_session_vault_audit(args: argparse.Namespace) -> int:
     print(f"tracked vault cards: {session.vault_count}")
     print(f"observed vault: {cents_to_dollars(observed_vault)}")
     print(f"observed vault cards: {observed_count}")
+    if observed_values is not None:
+        values = ", ".join(cents_to_dollars(value) for value in observed_values)
+        print(f"observed card values: {values}")
+        print(f"highest vault card: {cents_to_dollars(max(observed_values)) if observed_values else 'none'}")
     print(f"value delta: {cents_to_dollars(value_delta)}")
     print(f"card count delta: {count_delta:+d}")
     print(f"status: {'matched' if matched else 'mismatch'}")
 
     if args.commit:
-        event = commit_vault_audit(session, observed_vault, observed_count, args.source)
+        event = commit_vault_audit(
+            session,
+            observed_vault,
+            observed_count,
+            args.source,
+            observed_values,
+        )
         save_live_session(args.session, session)
         print("committed: vault audit")
         print(f"vault: {cents_to_dollars(session.vault_cents)}")
@@ -1549,6 +1564,15 @@ def command_session_result(args: argparse.Namespace) -> int:
     print(f"card: {cents_to_dollars(card_value)}")
     print(f"vault: {cents_to_dollars(session.vault_cents)}")
     print(f"action: {action}")
+    if session.pending is not None and session.pending.replaced_vault_cents is not None:
+        print(
+            "replacement: beats current highest vault card "
+            f"{cents_to_dollars(session.pending.replaced_vault_cents)}"
+        )
+        print(
+            "expected old-card return: "
+            f"{cents_to_dollars(session.pending.replaced_vault_cents)}"
+        )
 
     if action == "vault":
         if args.commit_vault:
@@ -1561,7 +1585,7 @@ def command_session_result(args: argparse.Namespace) -> int:
             _log_committed_event(args.ledger, event)
             return 0
         else:
-            print("next: tap Vault, then run session-vault")
+            print("next: tap Vault/replace, then run session-vault")
     else:
         print("next: tap Sell, then run session-buyback on the buyback sheet")
 
@@ -1773,6 +1797,15 @@ def _handle_session_result_screen(args: argparse.Namespace, session: LiveSession
     print(f"card: {cents_to_dollars(card_value)}")
     print(f"vault: {cents_to_dollars(session.vault_cents)}")
     print(f"action: {action}")
+    if session.pending is not None and session.pending.replaced_vault_cents is not None:
+        print(
+            "replacement: beats current highest vault card "
+            f"{cents_to_dollars(session.pending.replaced_vault_cents)}"
+        )
+        print(
+            "expected old-card return: "
+            f"{cents_to_dollars(session.pending.replaced_vault_cents)}"
+        )
     if action == "vault":
         if args.commit:
             event = commit_vault(session)
@@ -1784,7 +1817,7 @@ def _handle_session_result_screen(args: argparse.Namespace, session: LiveSession
             _log_committed_event(args.ledger, event)
         else:
             save_live_session(args.session, session)
-            print("next: tap Vault, then rerun this command with --commit")
+            print("next: tap Vault/replace, then rerun this command with --commit")
     else:
         save_live_session(args.session, session)
         print("next: tap Sell, then use session-screen on the buyback sheet")

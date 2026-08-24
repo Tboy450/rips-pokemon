@@ -39,9 +39,13 @@ Screen size in the sample: `1080x2340` portrait.
 6. `card_result`
    - Shows the revealed card, large value, card name, `Sell`, and `Vault`.
    - This is the main decision state.
-   - Read `revealed_card_value`, compare it to the pack cost, then choose:
-     - `vault` if card value is greater than the pack cost.
-     - `sell` otherwise to preserve bank liquidity.
+   - Read `revealed_card_value`, then choose from the best available vault
+     context:
+     - If individual vault card values are known from `session-vault-audit
+       --card-values ... --commit`, choose `vault` only when the revealed card
+       beats the current highest vault card and would replace it.
+     - If individual vault card values are unknown, fall back to the pack-cost
+       rule: `vault` above pack cost, `sell` at or below pack cost.
 
 7. `buyback_sheet`
    - Appears after choosing Sell.

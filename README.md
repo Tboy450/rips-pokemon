@@ -8,9 +8,11 @@ The current goal is not to automate purchases. It models the decision after a pa
 2. Focus on the `$1.00` and `$2.50` packs.
 3. Open one pack manually in the Android app.
 4. Enter the final card sell value into this tool.
-5. Treat the vault as a total collection value, not one replaceable card.
-6. Vault profitable cards when the card value is greater than the pack cost.
-7. Otherwise, sell the new card back into the bank.
+5. Track the vault total, card count, and, when appraised, individual card values.
+6. If individual vault values are known, vault only when the new card beats the
+   current highest vault card and would replace it.
+7. If individual vault values are unknown, fall back to the pack-cost rule:
+   vault values above pack cost and sell values at or below pack cost.
 
 ## App Flow Notes
 
@@ -187,8 +189,13 @@ python -m rips_ai session-result --image /path/to/result.png --rarity-hint "blue
 python -m rips_ai session-result --card-value 0.30 --rarity-hint "blue flashes"
 ```
 
-For live tracking, values above the pack cost are advised as `vault`; values at
-or below the pack cost are advised as `sell` to preserve bank liquidity.
+For live tracking, the best advice depends on how much vault detail is known. If
+`session-vault-audit --card-values ... --commit` has recorded individual vault
+card values, the revealed card is advised as `vault` only when it beats the
+current highest vault card and would replace it. If individual values are not
+known, the tool falls back to the older pack-cost rule: values above the pack
+cost are advised as `vault`, while values at or below cost are advised as `sell`
+to preserve bank liquidity.
 
 If the advice is `sell`, tap Sell in the app, then verify the buyback sheet:
 
@@ -327,11 +334,12 @@ tracker, then require confirmation before committing anything risky.
 
 5. Add a result-screen wait and decision loop.
    After opening a pack, the assistant should wait until the revealed card value
-   is readable, run the existing sell/vault rule, and keep the session pending.
-   If the value is above the pack cost, it should instruct or prepare a Vault
-   action. If the value is at or below cost, it should instruct or prepare a
-   Sell action. In both cases, the actual session commit should still happen
-   only after the in-app action is confirmed.
+   is readable, run the sell/vault rule, and keep the session pending. When
+   individual vault card values are known, compare the revealed card to the
+   current highest vault card and only prepare Vault if it improves that best
+   kept card. When slot values are unknown, fall back to the pack-cost rule. In
+   both cases, the actual session commit should still happen only after the
+   in-app action is confirmed.
 
 6. Add a guarded buyback confirmation flow.
    The buyback sheet should be read before accepting. If the offer does not
