@@ -46,18 +46,18 @@ The current implementation is advisor-first. It should not tap purchases automat
 At the time this context was written, the local working session was:
 
 ```text
-bank: $10.00
-vault: $8.90
-vault cards: 5
+bank: $10.30
+vault: $11.90
+vault cards: 6
 cash floor: $10.00
-pending: one_dollar at $1.00
+opened: 2
+pending: none
 ```
 
 Recreate that state on a new device with:
 
 ```bash
-python -m rips_ai session-start --bank 11 --vault 8.90 --vault-count 5 --min-bank 10 --force
-python -m rips_ai session-buy --pack one_dollar --purchase-confirmed
+python -m rips_ai session-start --bank 10.30 --vault 11.90 --vault-count 6 --min-bank 10 --force
 ```
 
 If the real app state has changed, start with the current real bank and vault instead.
@@ -232,8 +232,9 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
    post-buy picker carousel, the slice screen, the result screen, and buyback
    sheets before tapping.
 3. Convert `device-open-pack` into a state-machine flow: tap the lower buy
-   button, wait for the post-buy picker, spin once, select the centered pack,
-   slice with the long swipe plus fast follow-up, then wait for result.
+   button, wait for the post-buy picker, use a fast long carousel spin, select
+   the centered pack, slice with the long swipe plus fast follow-up, then wait
+   for result.
 4. Add a result/buyback loop that reads the card value, advises `sell` or
    `vault`, and only commits after the in-app action is confirmed.
 5. Turn `device-vault-gallery-plan` into a state-aware appraisal loop. Required

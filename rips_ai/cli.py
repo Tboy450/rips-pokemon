@@ -1863,6 +1863,15 @@ def _swipe_command(flow: dict[str, object], name: str) -> str:
     return f"input swipe {start_x} {start_y} {end_x} {end_y} {duration}"
 
 
+def _gesture_delay_seconds(
+    flow: dict[str, object],
+    name: str,
+    key: str,
+    default_ms: int,
+) -> float:
+    return int(_gesture(flow, name).get(key, default_ms)) / 1000
+
+
 def _open_pack_sequence(
     flow: dict[str, object],
     activity: str,
@@ -1892,9 +1901,19 @@ def _open_pack_sequence(
         return "; ".join(commands)
 
     if picker_spin in {"left", "both"}:
-        commands.extend([_swipe_command(flow, "spin_picker_left"), "sleep 0.8"])
+        commands.extend(
+            [
+                _swipe_command(flow, "spin_picker_left"),
+                f"sleep {_gesture_delay_seconds(flow, 'spin_picker_left', 'settle_ms', 1200):.2f}",
+            ]
+        )
     if picker_spin in {"right", "both"}:
-        commands.extend([_swipe_command(flow, "spin_picker_right"), "sleep 0.8"])
+        commands.extend(
+            [
+                _swipe_command(flow, "spin_picker_right"),
+                f"sleep {_gesture_delay_seconds(flow, 'spin_picker_right', 'settle_ms', 1200):.2f}",
+            ]
+        )
     commands.extend(
         [
             _tap_command(flow, "tap_center_pack"),

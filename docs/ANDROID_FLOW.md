@@ -20,7 +20,8 @@ Screen size in the sample: `1080x2340` portrait.
 
 3. `pack_picker`
    - Shows `Tap to select a pack to open`.
-   - Tap the centered pack after this state appears.
+   - Spin the picker carousel with a fast, long horizontal stroke, then tap
+     the centered pack after the spin settles.
    - Do not use this center tap on the main pack carousel; it can open the
      `What's inside` carousel instead of buying/opening.
 
@@ -176,8 +177,8 @@ session mutation. Execute the buy tap only when the main pack buy screen is
 visible. The staged flow prevents a bad tap on `What's inside` from silently
 deducting bank: `--stage tap-buy` sends only the orange-button tap and leaves
 Rips foreground for visual confirmation. After the app visibly reaches the
-post-buy picker/result flow, `--stage finish-open --purchase-observed` spins
-the picker, taps the centered pack, performs the calibrated long slice plus
+post-buy picker/result flow, `--stage finish-open --purchase-observed` uses a
+fast long picker spin, taps the centered pack, performs the calibrated long slice plus
 fast follow-up swipe, marks the session pending, and returns to Codex by
 default. Without `--purchase-observed`, the command sends gestures only and
 does not mutate the tracker. Use `--buy-tap X,Y` with `--dry-run` first when
