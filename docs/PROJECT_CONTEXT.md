@@ -66,8 +66,9 @@ At the time this context was written, the local working session was:
 
 ```text
 bank: $16.50
-vault: $6.80
+vault: $3.40
 vault cards: 2
+vault card values: $3.30, $0.10
 cash floor: $10.00
 opened: 2
 pending: none
@@ -76,7 +77,8 @@ pending: none
 Recreate that state on a new device with:
 
 ```bash
-python -m rips_ai session-start --bank 16.50 --vault 6.80 --vault-count 2 --min-bank 10 --force
+python -m rips_ai session-start --bank 16.50 --vault 3.40 --vault-count 2 --min-bank 10 --force
+python -m rips_ai session-vault-audit --card-values 3.30 0.10 --commit --source "manual vault card appraisals"
 ```
 
 If the real app state has changed, start with the current real bank and vault instead.
