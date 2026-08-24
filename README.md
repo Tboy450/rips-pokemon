@@ -186,6 +186,47 @@ This taps the lower `Buy for $1` button, spins the post-buy picker carousel,
 selects the centered pack, performs the stronger slice/reveal swipes, updates
 the session to pending, and returns to Codex by default.
 
+Check the visible bank after a draw or app action:
+
+```bash
+python -m rips_ai session-bank-check --bank 11
+python -m rips_ai session-bank-check --image /path/to/screenshot.png
+```
+
+The command reports tracked bank, observed bank, and delta. It does not change
+the session unless the visible value is trusted and `--commit` is supplied:
+
+```bash
+python -m rips_ai session-bank-check --bank 11 --source "visible app bank after draw" --commit
+```
+
+Audit the gallery-style vault by long-pressing each card for its appraisal
+value, recording the values, and entering them together:
+
+```bash
+python -m rips_ai session-vault-audit --card-values 1.00 2.50 5.40
+python -m rips_ai session-vault-audit --card-values 1.00 2.50 5.40 --commit
+```
+
+If only the app's total and card count are visible, use:
+
+```bash
+python -m rips_ai session-vault-audit --total 8.90 --count 5
+```
+
+Generate the later Shizuku long-press plan for the vault gallery without
+executing it:
+
+```bash
+python -m rips_ai device-vault-gallery-plan
+python -m rips_ai device-vault-gallery-plan --emit shell
+```
+
+The gallery parameters live in `config/rips_android_flow.json` under
+`vault_gallery`. Calibrate `first_card_center`, `x_step`, `y_step`, `columns`,
+`rows`, `pages`, `long_press_ms`, and the `vault_gallery_scroll_next` gesture
+from a real vault screenshot before executing any future automated appraisal.
+
 If `device-capture` times out, Android is still blocking Codex to Shizuku communication. Set both apps to unrestricted battery usage and confirm Shizuku service is running.
 
 ## Next Best Upgrade Steps
@@ -200,7 +241,10 @@ If `device-capture` times out, Android is still blocking Codex to Shizuku commun
    the in-app action.
 4. Add a buyback confirmation flow that verifies the offer amount before
    accepting or committing bank changes.
-5. Start logging every real pull to `data/outcomes.jsonl`, then export an
+5. Turn the vault gallery plan into a state-aware appraisal loop: long-press
+   each gallery card, read the appraised value, close the detail sheet, scroll
+   to the next page, and reconcile with `session-vault-audit`.
+6. Start logging every real pull to `data/outcomes.jsonl`, then export an
    observed pack config once there are enough samples to replace demo odds.
 
 ## Important Assumption

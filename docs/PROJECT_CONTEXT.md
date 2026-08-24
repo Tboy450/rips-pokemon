@@ -31,6 +31,12 @@ The current implementation is advisor-first. It should not tap purchases automat
 - Bankroll tiering keeps live recommendations on `$1` packs until bank reaches the `$2.50` unlock threshold, default `$15.00`; if bank drops below that threshold, recommendations fall back to `$1`.
 - The session tracker stores bank, vault, opened count, pending pack, and history in `data/live_session.json`.
 - Committed live sell/vault events are appended to `data/outcomes.jsonl` by default.
+- Visible bank checks are explicit audits. `session-bank-check` reports the
+  tracked bank, observed bank, and delta, and only rewrites tracked bank with
+  `--commit`.
+- Vault gallery appraisal is also explicit. `session-vault-audit` compares
+  tracked vault value/count against manually entered appraised values, and only
+  rewrites tracked vault totals with `--commit`.
 
 `data/live_session.json` is intentionally ignored by Git because it is device/session-specific.
 `data/outcomes.jsonl` is also ignored and should hold real observed pull data.
@@ -133,6 +139,24 @@ It taps the lower orange buy button, spins the post-buy picker carousel once,
 selects the centered pack, performs the long slice plus fast follow-up swipe,
 marks the session pending, and returns to Codex by default.
 
+Verify visible bank after a draw, sell/buyback, vault, or return to the buy
+screen:
+
+```bash
+python -m rips_ai session-bank-check --bank 11
+python -m rips_ai session-bank-check --bank 11 --source "visible app bank after draw" --commit
+```
+
+Audit the gallery-style vault by long-pressing each card in the app to reveal
+its appraisal/detail value, then entering the values:
+
+```bash
+python -m rips_ai device-vault-gallery-plan
+python -m rips_ai device-vault-gallery-plan --emit shell
+python -m rips_ai session-vault-audit --card-values 1.00 2.50 5.40
+python -m rips_ai session-vault-audit --card-values 1.00 2.50 5.40 --commit
+```
+
 Use `python -m rips_ai analyze-ledger` to summarize observed card values,
 observed profit, and sell/vault counts by pack.
 Use `python -m rips_ai export-ledger-config --output data/packs.observed.json`
@@ -181,9 +205,13 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
    slice with the long swipe plus fast follow-up, then wait for result.
 4. Add a result/buyback loop that reads the card value, advises `sell` or
    `vault`, and only commits after the in-app action is confirmed.
-5. Add collection-screen cross-checks to verify tracked vault value and card
+5. Turn `device-vault-gallery-plan` into a state-aware appraisal loop. Required
+   calibration parameters: top-left card center, grid columns/rows, center
+   spacing, page count, scroll gesture, long-press duration, close/back action,
+   and appraisal value OCR crop.
+6. Add collection-screen cross-checks to verify tracked vault value and card
    count after vault actions.
-6. Collect enough real outcomes in `data/outcomes.jsonl`, then export
+7. Collect enough real outcomes in `data/outcomes.jsonl`, then export
    `data/packs.observed.json` to replace placeholder pack odds.
 
 ## Safety Direction

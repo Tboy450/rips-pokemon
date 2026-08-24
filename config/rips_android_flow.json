@@ -14,6 +14,26 @@
     ],
     "require_manual_purchase_confirmation": true
   },
+  "vault_gallery": {
+    "notes": [
+      "Placeholder coordinates for later calibration when the gallery-style vault screen is visible.",
+      "Long-press each card to open its appraisal/detail value, record the value, close it, then move to the next card.",
+      "Confirm first_card_center, x_step, y_step, rows, columns, pages, and scroll gesture before executing with Shizuku."
+    ],
+    "columns": 3,
+    "rows": 2,
+    "pages": 1,
+    "first_card_center": [
+      190,
+      620
+    ],
+    "x_step": 350,
+    "y_step": 430,
+    "long_press_ms": 900,
+    "between_cards_ms": 500,
+    "appraisal_value_region": "vault_appraisal_value",
+    "close_action": "back"
+  },
   "states": [
     {
       "id": "pack_carousel",
@@ -253,6 +273,17 @@
         540,
         2010
       ]
+    },
+    "vault_gallery_scroll_next": {
+      "from": [
+        540,
+        1850
+      ],
+      "to": [
+        540,
+        640
+      ],
+      "duration_ms": 800
     }
   }
 }

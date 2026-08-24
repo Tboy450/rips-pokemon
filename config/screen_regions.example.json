@@ -35,6 +35,14 @@
       "psm": 7,
       "scale": 3
     },
+    "vault_appraisal_value": {
+      "x": 0.62,
+      "y": 0.50,
+      "width": 0.32,
+      "height": 0.06,
+      "psm": 7,
+      "scale": 3
+    },
     "sell_button": {
       "x": 0.046,
       "y": 0.863,

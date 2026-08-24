@@ -47,6 +47,9 @@ Screen size in the sample: `1080x2340` portrait.
 8. `collection`
    - Shows `My Collection` and visible card values.
    - Use this as a periodic cross-check. The live advisor should primarily maintain vault value from its own decisions.
+   - The gallery-style vault needs a long-press appraisal loop: long-press one
+     visible card, read/write down its appraised value, close the appraisal,
+     then repeat for each visible card and scroll to the next gallery page.
 
 ## Calibrated Files
 
@@ -121,3 +124,39 @@ Use this only when the main pack buy screen is visible. It taps the lower
 orange buy button, spins the post-buy picker carousel once, taps the centered
 pack, performs the calibrated long slice plus fast follow-up swipe, updates the
 session to pending, and returns to Codex unless `--stay-in-rips` is supplied.
+
+Bank verification after a draw:
+
+```bash
+python -m rips_ai session-bank-check --bank 11
+python -m rips_ai session-bank-check --image data/latest_screen.png
+python -m rips_ai session-bank-check --bank 11 --source "visible app bank after draw" --commit
+```
+
+Use this after pack result resolution, sell/buyback, vault, or returning to the
+buy screen. It prints tracked bank, observed bank, delta, and pending state.
+Only use `--commit` after the visible bank is trusted.
+
+Vault gallery appraisal:
+
+```bash
+python -m rips_ai device-vault-gallery-plan
+python -m rips_ai device-vault-gallery-plan --emit shell
+python -m rips_ai session-vault-audit --card-values 1.00 2.50 5.40 --commit
+```
+
+The current `vault_gallery` config is a placeholder. Before executing a future
+Shizuku appraisal loop, calibrate these parameters from a real gallery screen:
+
+1. `first_card_center`: center of the top-left visible card.
+2. `columns` and `rows`: visible card grid dimensions before scrolling.
+3. `x_step` and `y_step`: distance between adjacent card centers.
+4. `pages`: number of gallery screens needed to cover all cards.
+5. `long_press_ms`: duration needed to open appraisal/details.
+6. `between_cards_ms`: minimum close/wait time before the next card.
+7. `vault_gallery_scroll_next`: swipe from one gallery page to the next.
+8. Appraisal value OCR region: crop box around the value shown after long press.
+
+Later implementation should be a state machine, not blind looping: verify the
+vault gallery is visible, long-press one card, verify the appraisal/detail sheet
+is open, read the value, close it, confirm the gallery returned, then continue.

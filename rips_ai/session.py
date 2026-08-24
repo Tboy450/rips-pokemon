@@ -77,6 +77,52 @@ def start_live_session(
     )
 
 
+def commit_bank_reconciliation(
+    session: LiveSession,
+    observed_bank_cents: int,
+    source: str | None = None,
+) -> dict[str, object]:
+    previous_bank_cents = session.bank_cents
+    session.bank_cents = observed_bank_cents
+    event = {
+        "recorded_at": utc_now(),
+        "type": "bank_reconciliation",
+        "source": source,
+        "bank_before_cents": previous_bank_cents,
+        "observed_bank_cents": observed_bank_cents,
+        "bank_delta_cents": observed_bank_cents - previous_bank_cents,
+        "pending_pack_id": None if session.pending is None else session.pending.pack_id,
+    }
+    session.history.append(event)
+    return event
+
+
+def commit_vault_audit(
+    session: LiveSession,
+    observed_vault_cents: int,
+    observed_vault_count: int,
+    source: str | None = None,
+) -> dict[str, object]:
+    previous_vault_cents = session.vault_cents
+    previous_vault_count = session.vault_count
+    session.vault_cents = observed_vault_cents
+    session.vault_count = observed_vault_count
+    event = {
+        "recorded_at": utc_now(),
+        "type": "vault_audit",
+        "source": source,
+        "vault_before_cents": previous_vault_cents,
+        "vault_before_count": previous_vault_count,
+        "observed_vault_cents": observed_vault_cents,
+        "observed_vault_count": observed_vault_count,
+        "vault_delta_cents": observed_vault_cents - previous_vault_cents,
+        "vault_count_delta": observed_vault_count - previous_vault_count,
+        "pending_pack_id": None if session.pending is None else session.pending.pack_id,
+    }
+    session.history.append(event)
+    return event
+
+
 def begin_pending_pack(session: LiveSession, pack_id: str, pack_price_cents: int) -> None:
     if session.pending is not None:
         raise ValueError("session already has a pending pack result")

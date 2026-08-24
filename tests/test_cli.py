@@ -495,6 +495,169 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertEqual(observed["packs"][0]["observations"], 2)
         self.assertEqual(observed["packs"][0]["outcomes"][1]["value_cents"], 250)
 
+    def test_session_bank_check_reports_mismatch_without_commit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session = Path(temp_dir) / "session.json"
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "10",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "session-bank-check",
+                        "--session",
+                        str(session),
+                        "--bank",
+                        "11",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1000)
+        text = output.getvalue()
+        self.assertIn("tracked bank: $10.00", text)
+        self.assertIn("observed bank: $11.00", text)
+        self.assertIn("status: mismatch", text)
+
+    def test_session_bank_check_commit_reconciles_bank(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session = Path(temp_dir) / "session.json"
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "10",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+                result = main(
+                    [
+                        "session-bank-check",
+                        "--session",
+                        str(session),
+                        "--bank",
+                        "11",
+                        "--source",
+                        "visible app bank after draw",
+                        "--commit",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1100)
+        self.assertEqual(loaded.history[-1]["type"], "bank_reconciliation")
+        self.assertEqual(loaded.history[-1]["source"], "visible app bank after draw")
+
+    def test_session_vault_audit_from_card_values_commit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session = Path(temp_dir) / "session.json"
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "10",
+                            "--vault",
+                            "5",
+                            "--vault-count",
+                            "2",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+                result = main(
+                    [
+                        "session-vault-audit",
+                        "--session",
+                        str(session),
+                        "--card-values",
+                        "$1.00,$2.50",
+                        "5.40",
+                        "--commit",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.vault_cents, 890)
+        self.assertEqual(loaded.vault_count, 3)
+        self.assertEqual(loaded.history[-1]["type"], "vault_audit")
+
+    def test_device_vault_gallery_plan_prints_card_points(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            flow = Path(temp_dir) / "flow.json"
+            flow.write_text(
+                json.dumps(
+                    {
+                        "vault_gallery": {
+                            "columns": 2,
+                            "rows": 2,
+                            "pages": 1,
+                            "first_card_center": [100, 200],
+                            "x_step": 50,
+                            "y_step": 60,
+                            "long_press_ms": 900,
+                            "between_cards_ms": 500,
+                        },
+                        "gestures": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "device-vault-gallery-plan",
+                        "--flow",
+                        str(flow),
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        text = output.getvalue()
+        self.assertIn("gallery slots: 4", text)
+        self.assertIn("card 4: page 1, row 2, column 2, center (150, 260)", text)
+
 
 if __name__ == "__main__":
     unittest.main()

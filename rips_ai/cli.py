@@ -42,12 +42,15 @@ from .session import (
     LiveSession,
     advise_pending_result,
     begin_pending_pack,
+    commit_bank_reconciliation,
     commit_buyback,
+    commit_vault_audit,
     commit_vault,
     load_live_session,
     save_live_session,
     start_live_session,
 )
+from .vault import build_gallery_points, parse_money_values
 
 
 DEFAULT_CONFIG = Path("config/packs.example.json")
@@ -186,6 +189,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     session_status = subparsers.add_parser("session-status", help="show live tracking state")
     session_status.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+
+    session_bank_check = subparsers.add_parser(
+        "session-bank-check",
+        help="compare the tracked bank against a visible/manual bank total",
+    )
+    session_bank_check.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+    session_bank_check.add_argument("--regions", type=Path, default=Path("config/screen_regions.example.json"))
+    session_bank_check.add_argument("--image", type=Path, help="screenshot containing the bank chip")
+    session_bank_check.add_argument("--bank", help="manual visible bank value")
+    session_bank_check.add_argument("--source", default="manual", help="short note for the audit history")
+    session_bank_check.add_argument(
+        "--commit",
+        action="store_true",
+        help="replace the tracked bank with the observed value and log a reconciliation event",
+    )
+
+    session_vault_audit = subparsers.add_parser(
+        "session-vault-audit",
+        help="compare the tracked vault against appraised gallery card values",
+    )
+    session_vault_audit.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+    session_vault_audit.add_argument(
+        "--card-values",
+        nargs="*",
+        help="one or more appraised card values; comma-separated values are also accepted",
+    )
+    session_vault_audit.add_argument("--values-file", type=Path, help="file containing appraised card values")
+    session_vault_audit.add_argument("--total", help="manual total vault value if individual values are unavailable")
+    session_vault_audit.add_argument("--count", type=int, help="manual vault card count when using --total")
+    session_vault_audit.add_argument("--source", default="manual gallery appraisal")
+    session_vault_audit.add_argument(
+        "--commit",
+        action="store_true",
+        help="replace tracked vault total/card count with the observed audit values",
+    )
 
     session_recommend = subparsers.add_parser(
         "session-recommend",
@@ -355,6 +393,27 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=30,
         help="maximum seconds for the Shizuku gesture sequence",
+    )
+
+    vault_plan = subparsers.add_parser(
+        "device-vault-gallery-plan",
+        help="print the long-press coordinate plan for vault gallery appraisal",
+    )
+    vault_plan.add_argument("--flow", type=Path, default=DEFAULT_FLOW)
+    vault_plan.add_argument("--columns", type=int, help="visible card columns")
+    vault_plan.add_argument("--rows", type=int, help="visible card rows")
+    vault_plan.add_argument("--pages", type=int, help="gallery pages/screens to scan")
+    vault_plan.add_argument("--first-x", type=int, help="x center of the first visible card")
+    vault_plan.add_argument("--first-y", type=int, help="y center of the first visible card")
+    vault_plan.add_argument("--x-step", type=int, help="horizontal distance between card centers")
+    vault_plan.add_argument("--y-step", type=int, help="vertical distance between card centers")
+    vault_plan.add_argument("--long-press-ms", type=int, help="long-press duration for appraisal")
+    vault_plan.add_argument("--between-cards-ms", type=int, help="delay between card appraisal steps")
+    vault_plan.add_argument(
+        "--emit",
+        choices=("text", "shell", "json"),
+        default="text",
+        help="output format for the generated plan",
     )
 
     device_capture = subparsers.add_parser(
@@ -833,6 +892,113 @@ def command_session_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _read_bank_value(
+    image: Path | None,
+    manual_bank: str | None,
+    regions_path: Path,
+) -> int | None:
+    if (image is None) == (manual_bank is None):
+        raise ValueError("provide exactly one of --bank or --image")
+    if manual_bank is not None:
+        return dollars_to_cents(manual_bank)
+
+    regions = load_regions(regions_path)
+    observation = observation_from_regions(
+        image,
+        {name: region for name, region in regions.items() if name == "bank"},
+    )
+    return observation.bank_cents
+
+
+def command_session_bank_check(args: argparse.Namespace) -> int:
+    try:
+        session = _load_session(args.session)
+        observed_bank = _read_bank_value(args.image, args.bank, args.regions)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if observed_bank is None:
+        print("status: unknown")
+        print("reason: visible bank value was not measurable")
+        return 0
+
+    delta = observed_bank - session.bank_cents
+    print(f"tracked bank: {cents_to_dollars(session.bank_cents)}")
+    print(f"observed bank: {cents_to_dollars(observed_bank)}")
+    print(f"delta: {cents_to_dollars(delta)}")
+    print(f"status: {'matched' if delta == 0 else 'mismatch'}")
+    if session.pending is not None:
+        print(f"pending: {session.pending.pack_id} at {cents_to_dollars(session.pending.pack_price_cents)}")
+        print("note: pending pack state can explain a bank difference until the result is resolved")
+
+    if args.commit:
+        event = commit_bank_reconciliation(session, observed_bank, args.source)
+        save_live_session(args.session, session)
+        print("committed: bank reconciliation")
+        print(f"bank: {cents_to_dollars(session.bank_cents)}")
+        print(f"history event: {event['type']}")
+    else:
+        print("next: rerun with --commit only if the visible bank is trusted")
+    return 0
+
+
+def _vault_audit_values(args: argparse.Namespace) -> tuple[int, int]:
+    value_modes = [
+        bool(args.card_values),
+        args.values_file is not None,
+        args.total is not None or args.count is not None,
+    ]
+    if sum(1 for enabled in value_modes if enabled) != 1:
+        raise ValueError(
+            "provide exactly one of --card-values, --values-file, or --total with --count"
+        )
+
+    if args.card_values:
+        values = parse_money_values(args.card_values)
+        return sum(values), len(values)
+    if args.values_file is not None:
+        values = parse_money_values([args.values_file.read_text(encoding="utf-8")])
+        return sum(values), len(values)
+
+    if args.total is None or args.count is None:
+        raise ValueError("--total requires --count")
+    if args.count < 0:
+        raise ValueError("--count cannot be negative")
+    return dollars_to_cents(args.total), args.count
+
+
+def command_session_vault_audit(args: argparse.Namespace) -> int:
+    try:
+        session = _load_session(args.session)
+        observed_vault, observed_count = _vault_audit_values(args)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    value_delta = observed_vault - session.vault_cents
+    count_delta = observed_count - session.vault_count
+    matched = value_delta == 0 and count_delta == 0
+    print(f"tracked vault: {cents_to_dollars(session.vault_cents)}")
+    print(f"tracked vault cards: {session.vault_count}")
+    print(f"observed vault: {cents_to_dollars(observed_vault)}")
+    print(f"observed vault cards: {observed_count}")
+    print(f"value delta: {cents_to_dollars(value_delta)}")
+    print(f"card count delta: {count_delta:+d}")
+    print(f"status: {'matched' if matched else 'mismatch'}")
+
+    if args.commit:
+        event = commit_vault_audit(session, observed_vault, observed_count, args.source)
+        save_live_session(args.session, session)
+        print("committed: vault audit")
+        print(f"vault: {cents_to_dollars(session.vault_cents)}")
+        print(f"vault cards: {session.vault_count}")
+        print(f"history event: {event['type']}")
+    else:
+        print("next: rerun with --commit only after all gallery card appraisals are accounted for")
+    return 0
+
+
 def command_session_recommend(args: argparse.Namespace) -> int:
     try:
         session = _load_session(args.session)
@@ -1240,6 +1406,149 @@ def _open_pack_sequence(
     return "; ".join(commands)
 
 
+def _vault_gallery_config(flow: dict[str, object]) -> dict[str, object]:
+    gallery = flow.get("vault_gallery", {})
+    if not isinstance(gallery, dict):
+        return {}
+    return gallery
+
+
+def _gallery_int_arg(
+    args: argparse.Namespace,
+    attr: str,
+    gallery: dict[str, object],
+    key: str,
+) -> int:
+    value = getattr(args, attr)
+    if value is not None:
+        return int(value)
+    if key not in gallery:
+        raise ValueError(f"provide --{attr.replace('_', '-')} or set vault_gallery.{key}")
+    return int(gallery[key])
+
+
+def _gallery_first_point(args: argparse.Namespace, gallery: dict[str, object]) -> tuple[int, int]:
+    if args.first_x is not None and args.first_y is not None:
+        return args.first_x, args.first_y
+    if args.first_x is not None or args.first_y is not None:
+        raise ValueError("provide both --first-x and --first-y")
+
+    point = gallery.get("first_card_center")
+    if not isinstance(point, list | tuple) or len(point) != 2:
+        raise ValueError("provide --first-x/--first-y or set vault_gallery.first_card_center")
+    return int(point[0]), int(point[1])
+
+
+def _optional_swipe_command(flow: dict[str, object], name: str) -> str | None:
+    try:
+        return _swipe_command(flow, name)
+    except ValueError:
+        return None
+
+
+def _gallery_plan_parameters(args: argparse.Namespace) -> tuple[dict[str, int], tuple[object, ...], str | None]:
+    flow = _load_flow(args.flow)
+    gallery = _vault_gallery_config(flow)
+    first_x, first_y = _gallery_first_point(args, gallery)
+    parameters = {
+        "columns": _gallery_int_arg(args, "columns", gallery, "columns"),
+        "rows": _gallery_int_arg(args, "rows", gallery, "rows"),
+        "pages": _gallery_int_arg(args, "pages", gallery, "pages"),
+        "first_x": first_x,
+        "first_y": first_y,
+        "x_step": _gallery_int_arg(args, "x_step", gallery, "x_step"),
+        "y_step": _gallery_int_arg(args, "y_step", gallery, "y_step"),
+        "long_press_ms": _gallery_int_arg(args, "long_press_ms", gallery, "long_press_ms"),
+        "between_cards_ms": _gallery_int_arg(args, "between_cards_ms", gallery, "between_cards_ms"),
+    }
+    points = build_gallery_points(
+        columns=parameters["columns"],
+        rows=parameters["rows"],
+        pages=parameters["pages"],
+        first_x=parameters["first_x"],
+        first_y=parameters["first_y"],
+        x_step=parameters["x_step"],
+        y_step=parameters["y_step"],
+    )
+    scroll_command = _optional_swipe_command(flow, "vault_gallery_scroll_next")
+    return parameters, points, scroll_command
+
+
+def _print_gallery_shell_plan(
+    parameters: dict[str, int],
+    points: tuple[object, ...],
+    scroll_command: str | None,
+) -> None:
+    previous_page = 1
+    for point in points:
+        if point.page != previous_page:
+            if scroll_command is None:
+                print(f"# Page {point.page}: scroll gesture is not configured")
+            else:
+                print("# Scroll to next gallery page")
+                print(scroll_command)
+                print("sleep 0.8")
+            previous_page = point.page
+        print(f"# Card {point.index}: page {point.page}, row {point.row}, column {point.column}")
+        print(
+            "input swipe "
+            f"{point.x} {point.y} {point.x} {point.y} {parameters['long_press_ms']}"
+        )
+        print("sleep 0.6")
+        print("# Read/write down the appraisal value now")
+        print("input keyevent BACK")
+        print(f"sleep {parameters['between_cards_ms'] / 1000:.2f}")
+
+
+def command_device_vault_gallery_plan(args: argparse.Namespace) -> int:
+    try:
+        parameters, points, scroll_command = _gallery_plan_parameters(args)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if args.emit == "json":
+        print(
+            json.dumps(
+                {
+                    "parameters": parameters,
+                    "points": [point.__dict__ for point in points],
+                    "scroll_command": scroll_command,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.emit == "shell":
+        _print_gallery_shell_plan(parameters, points, scroll_command)
+        return 0
+
+    print(f"gallery slots: {len(points)}")
+    print(
+        "grid: "
+        f"{parameters['columns']} columns x {parameters['rows']} rows x "
+        f"{parameters['pages']} pages"
+    )
+    print(f"first card center: ({parameters['first_x']}, {parameters['first_y']})")
+    print(f"step: x {parameters['x_step']}, y {parameters['y_step']}")
+    print(f"long press: {parameters['long_press_ms']}ms")
+    print(f"between cards: {parameters['between_cards_ms']}ms")
+    if parameters["pages"] > 1 and scroll_command is None:
+        print("warning: pages > 1 but vault_gallery_scroll_next is not configured")
+    for point in points:
+        print(
+            f"card {point.index}: page {point.page}, row {point.row}, "
+            f"column {point.column}, center ({point.x}, {point.y})"
+        )
+    print(
+        "next: appraise each card, then run "
+        "session-vault-audit --card-values VALUE..."
+    )
+    return 0
+
+
 def command_device_open_pack(args: argparse.Namespace) -> int:
     if not args.confirmed_buy_screen:
         print("action: wait")
@@ -1337,6 +1646,8 @@ def main(argv: list[str] | None = None) -> int:
         "classify-screen": command_classify_screen,
         "session-start": command_session_start,
         "session-status": command_session_status,
+        "session-bank-check": command_session_bank_check,
+        "session-vault-audit": command_session_vault_audit,
         "session-recommend": command_session_recommend,
         "session-plan": command_session_plan,
         "session-buy": command_session_buy,
@@ -1345,6 +1656,7 @@ def main(argv: list[str] | None = None) -> int:
         "session-vault": command_session_vault,
         "session-screen": command_session_screen,
         "device-open-pack": command_device_open_pack,
+        "device-vault-gallery-plan": command_device_vault_gallery_plan,
         "device-capture": command_device_capture,
         "device-advise": command_device_advise,
     }
