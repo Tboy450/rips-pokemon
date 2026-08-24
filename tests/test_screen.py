@@ -51,8 +51,12 @@ class ScreenParsingTests(unittest.TestCase):
     def test_classify_screen_text(self):
         self.assertEqual(classify_screen_text("Accept Buyback Offer\nBuyback offer $2.50"), "buyback")
         self.assertEqual(classify_screen_text("Estimated Payout Odds\nApply"), "pack_style")
+        self.assertEqual(classify_screen_text("Tap to select a pack to open"), "pack_picker")
         self.assertEqual(classify_screen_text("$0.30\nSell Vault"), "result")
+        self.assertEqual(classify_screen_text("My Collection\nPrice $2.50"), "vault_gallery")
+        self.assertEqual(classify_screen_text("Card appraisal\nAppraised value $2.50"), "vault_appraisal")
         self.assertEqual(classify_screen_text("Pokemon Starter Pack\nBuy for $1"), "pack")
+        self.assertEqual(classify_screen_text("What's inside\nCommon card carousel"), "whats_inside")
 
 
 if __name__ == "__main__":

@@ -336,7 +336,18 @@ def build_parser() -> argparse.ArgumentParser:
     session_screen.add_argument("--regions", type=Path, default=Path("config/screen_regions.example.json"))
     session_screen.add_argument(
         "--state",
-        choices=("auto", "pack", "result", "buyback"),
+        choices=(
+            "auto",
+            "pack",
+            "pack_style",
+            "pack_picker",
+            "whats_inside",
+            "result",
+            "buyback",
+            "vault_gallery",
+            "vault_appraisal",
+            "unknown",
+        ),
         default="auto",
     )
     session_screen.add_argument("--pack", help="pack id to mark bought on a pack screen")
@@ -378,6 +389,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--confirmed-buy-screen",
         action="store_true",
         help="required; confirms Rips is on the main pack buy screen, not What's inside",
+    )
+    device_open.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the gesture sequence and planned session mutation without running Shizuku",
     )
     device_open.add_argument(
         "--stay-in-rips",
@@ -948,6 +964,8 @@ def command_session_workflow(args: argparse.Namespace) -> int:
             return 0
         print(f"next: plan {pack.name} ({pack.id})")
         print(f"  python -m rips_ai session-plan --pack {pack.id}")
+        print("next: review the exact device gesture plan without touching Rips")
+        print(f"  python -m rips_ai device-open-pack --pack {pack.id} --dry-run")
         print("next: open only from the confirmed main buy screen")
         print(
             "  python -m rips_ai device-open-pack "
@@ -1288,11 +1306,6 @@ def command_session_screen(args: argparse.Namespace) -> int:
         state = args.state
         if state == "auto":
             state, _ = classify_image(args.image)
-            if state == "pack_style":
-                print("screen: pack_style")
-                print("action: apply or close")
-                print("reason: this sheet changes pack odds/style, not bank/vault state")
-                return 0
             if state == "unknown":
                 print("screen: unknown")
                 print("action: wait")
@@ -1300,6 +1313,18 @@ def command_session_screen(args: argparse.Namespace) -> int:
                 return 0
 
         print(f"screen: {state}")
+        if state == "unknown":
+            print("action: wait")
+            print("reason: screenshot state could not be classified")
+            return 0
+        if state in {
+            "pack_style",
+            "pack_picker",
+            "whats_inside",
+            "vault_gallery",
+            "vault_appraisal",
+        }:
+            return _handle_session_navigation_screen(state)
         if state == "pack":
             return _handle_session_pack_screen(args, session)
         if state == "result":
@@ -1312,6 +1337,42 @@ def command_session_screen(args: argparse.Namespace) -> int:
 
     print(f"unsupported screen state: {state}", file=sys.stderr)
     return 1
+
+
+def _handle_session_navigation_screen(state: str) -> int:
+    guidance = {
+        "pack_style": (
+            "apply or close",
+            "this sheet changes pack odds/style, not bank/vault state",
+            "return to the main pack carousel before buying or committing a pack",
+        ),
+        "pack_picker": (
+            "continue opening",
+            "this is after the buy/open step, so do not deduct bank again",
+            "select/spin the picker pack, slice it, then resolve the result screen",
+        ),
+        "whats_inside": (
+            "go back",
+            "the What's inside carousel is informational and is not the buy/open flow",
+            "return to the main pack carousel and use the lower Buy button",
+        ),
+        "vault_gallery": (
+            "audit vault",
+            "the gallery is for appraising collection value, not resolving a pending pack",
+            "use device-vault-gallery-plan, then session-vault-audit with the appraised values",
+        ),
+        "vault_appraisal": (
+            "record appraisal",
+            "this detail sheet should feed the vault audit, not pack result tracking",
+            "write down the value, close the sheet, and continue the gallery audit",
+        ),
+    }
+    action, reason, next_step = guidance[state]
+    print(f"action: {action}")
+    print(f"reason: {reason}")
+    print(f"next: {next_step}")
+    print("committed: no session change")
+    return 0
 
 
 def _handle_session_pack_screen(args: argparse.Namespace, session: LiveSession) -> int:
@@ -1512,6 +1573,28 @@ def _open_pack_sequence(
     return "; ".join(commands)
 
 
+def _print_open_pack_dry_run(
+    session: LiveSession,
+    pack,
+    command: str,
+    confirmed_buy_screen: bool,
+) -> None:
+    print("dry-run: device-open-pack")
+    print(f"pack: {pack.name} ({pack.id})")
+    print(f"price: {cents_to_dollars(pack.price_cents)}")
+    print(f"tracked bank before: {cents_to_dollars(session.bank_cents)}")
+    print(f"planned bank after buy: {cents_to_dollars(session.bank_cents - pack.price_cents)}")
+    print(f"planned pending: {pack.id} at {cents_to_dollars(pack.price_cents)}")
+    print("session mutation: none during dry run")
+    if confirmed_buy_screen:
+        print("screen confirmation: main buy screen confirmed")
+    else:
+        print("screen confirmation: execution still requires --confirmed-buy-screen")
+    print("shizuku sequence:")
+    for step in command.split("; "):
+        print(f"  {step}")
+
+
 def _vault_gallery_config(flow: dict[str, object]) -> dict[str, object]:
     gallery = flow.get("vault_gallery", {})
     if not isinstance(gallery, dict):
@@ -1656,7 +1739,7 @@ def command_device_vault_gallery_plan(args: argparse.Namespace) -> int:
 
 
 def command_device_open_pack(args: argparse.Namespace) -> int:
-    if not args.confirmed_buy_screen:
+    if not args.confirmed_buy_screen and not args.dry_run:
         print("action: wait")
         print("reason: --confirmed-buy-screen is required before tapping Buy")
         return 0
@@ -1686,6 +1769,14 @@ def command_device_open_pack(args: argparse.Namespace) -> int:
             stay_in_rips=args.stay_in_rips,
             picker_spin=args.picker_spin,
         )
+        if args.dry_run:
+            _print_open_pack_dry_run(
+                session=session,
+                pack=pack,
+                command=command,
+                confirmed_buy_screen=args.confirmed_buy_screen,
+            )
+            return 0
         output = run_shizuku_shell(command, timeout_seconds=args.timeout)
         begin_pending_pack(session, pack.id, pack.price_cents)
         save_live_session(args.session, session)

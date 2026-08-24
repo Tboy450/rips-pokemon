@@ -131,6 +131,10 @@ python -m rips_ai session-screen /path/to/result.png --rarity-hint "blue flashes
 python -m rips_ai session-screen /path/to/buyback.png --commit
 ```
 
+`session-screen` also classifies `whats_inside`, `pack_picker`,
+`vault_gallery`, and `vault_appraisal` as navigation-only states. Those states
+print the next workflow action and do not mutate tracked session values.
+
 Use manual values when OCR is not available or not trusted:
 
 ```bash
@@ -142,12 +146,15 @@ python -m rips_ai session-buyback --amount 0.30 --commit
 Use the calibrated live Shizuku flow only when the main buy screen is visible:
 
 ```bash
+python -m rips_ai device-open-pack --pack one_dollar --dry-run
 python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
 ```
 
-It taps the lower orange buy button, spins the post-buy picker carousel once,
-selects the centered pack, performs the long slice plus fast follow-up swipe,
-marks the session pending, and returns to Codex by default.
+The dry run prints the gesture sequence and planned session mutation without
+touching Rips. The confirmed command taps the lower orange buy button, spins
+the post-buy picker carousel once, selects the centered pack, performs the long
+slice plus fast follow-up swipe, marks the session pending, and returns to
+Codex by default.
 
 Verify visible bank after a draw, sell/buyback, vault, or return to the buy
 screen:

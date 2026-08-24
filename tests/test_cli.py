@@ -273,6 +273,53 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertIsNone(loaded.pending)
         self.assertIn("--purchase-confirmed", output.getvalue())
 
+    def test_session_screen_whats_inside_is_navigation_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            session = root / "session.json"
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "13",
+                            "--vault",
+                            "7.10",
+                            "--vault-count",
+                            "3",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "session-screen",
+                        str(root / "screen.png"),
+                        "--session",
+                        str(session),
+                        "--state",
+                        "whats_inside",
+                        "--commit",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1300)
+        self.assertIsNone(loaded.pending)
+        text = output.getvalue()
+        self.assertIn("screen: whats_inside", text)
+        self.assertIn("action: go back", text)
+        self.assertIn("committed: no session change", text)
+
     def test_session_plan_reports_weighted_one_dollar_probability(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -664,6 +711,7 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertIn("stage: ready_for_bank_check_and_pack_choice", text)
         self.assertIn("session-bank-check --bank VALUE", text)
         self.assertIn("session-vault-audit --card-values VALUE", text)
+        self.assertIn("device-open-pack --pack one_dollar --dry-run", text)
         self.assertIn("device-open-pack --pack one_dollar --confirmed-buy-screen", text)
 
     def test_session_workflow_pending_sell_includes_buyback_and_bank_check(self):
@@ -736,6 +784,93 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertIn("stage: waiting_for_sell_buyback", text)
         self.assertIn("session-buyback --amount $0.50 --commit", text)
         self.assertIn("session-bank-check --bank VALUE", text)
+
+    def test_device_open_pack_dry_run_does_not_mutate_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            flow = root / "flow.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+            flow.write_text(
+                json.dumps(
+                    {
+                        "gestures": {
+                            "tap_buy": {"at": [540, 1950]},
+                            "spin_picker_left": {
+                                "from": [820, 1220],
+                                "to": [260, 1220],
+                                "duration_ms": 600,
+                            },
+                            "spin_picker_right": {
+                                "from": [260, 1220],
+                                "to": [820, 1220],
+                                "duration_ms": 600,
+                            },
+                            "tap_center_pack": {"at": [540, 1220]},
+                            "slice_left_to_right": {
+                                "from": [60, 1240],
+                                "to": [1020, 1240],
+                                "duration_ms": 700,
+                            },
+                            "speed_up_reveal_swipe": {
+                                "from": [60, 1320],
+                                "to": [1020, 1320],
+                                "duration_ms": 250,
+                                "delay_ms": 350,
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "13",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "device-open-pack",
+                        "--session",
+                        str(session),
+                        "--config",
+                        str(config),
+                        "--flow",
+                        str(flow),
+                        "--pack",
+                        "one_dollar",
+                        "--dry-run",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1300)
+        self.assertIsNone(loaded.pending)
+        text = output.getvalue()
+        self.assertIn("dry-run: device-open-pack", text)
+        self.assertIn("session mutation: none during dry run", text)
+        self.assertIn("execution still requires --confirmed-buy-screen", text)
+        self.assertIn("input tap 540 1950", text)
 
     def test_device_vault_gallery_plan_prints_card_points(self):
         with tempfile.TemporaryDirectory() as temp_dir:

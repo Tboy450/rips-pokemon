@@ -10,6 +10,9 @@ Screen size in the sample: `1080x2340` portrait.
    - Shows category, cash bank, centered pack, min value, max pull, pack style, and the orange buy button.
    - Example: `Pokemon Starter Pack`, `Buy for $1`.
    - The bank chip can briefly show a transaction overlay underneath it, so OCR reads only the tight top chip region.
+   - The gray `What's inside` button can open a separate informational
+     carousel. That is not the buy/open flow and should be classified as
+     `whats_inside`.
 
 2. `pack_style_sheet`
    - Shows `Estimated Payout Odds`, `Normal`/`High`, and `Apply`.
@@ -50,6 +53,18 @@ Screen size in the sample: `1080x2340` portrait.
    - The gallery-style vault needs a long-press appraisal loop: long-press one
      visible card, read/write down its appraised value, close the appraisal,
      then repeat for each visible card and scroll to the next gallery page.
+
+Navigation-only states:
+
+- `whats_inside`: informational carousel; go back to the main pack carousel.
+- `pack_picker`: post-buy picker; continue opening, but do not deduct bank
+  again.
+- `vault_gallery`: collection audit screen; use gallery appraisal workflow.
+- `vault_appraisal`: record the appraised value, close the sheet, and continue
+  the vault audit.
+
+`session-screen` returns guidance for these states and does not mutate the live
+session.
 
 ## Calibrated Files
 
@@ -140,13 +155,16 @@ python -m rips_ai device-advise --state buyback --expected-sell 0.30
 Live open path:
 
 ```bash
+python -m rips_ai device-open-pack --pack one_dollar --dry-run
 python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
 ```
 
-Use this only when the main pack buy screen is visible. It taps the lower
-orange buy button, spins the post-buy picker carousel once, taps the centered
-pack, performs the calibrated long slice plus fast follow-up swipe, updates the
-session to pending, and returns to Codex unless `--stay-in-rips` is supplied.
+Use the dry run first to review the exact Shizuku shell sequence and planned
+session mutation. Execute only when the main pack buy screen is visible. The
+confirmed command taps the lower orange buy button, spins the post-buy picker
+carousel once, taps the centered pack, performs the calibrated long slice plus
+fast follow-up swipe, updates the session to pending, and returns to Codex
+unless `--stay-in-rips` is supplied.
 
 Bank verification after a draw:
 

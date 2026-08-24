@@ -133,6 +133,11 @@ Use one screenshot and let the tool classify the current Rips screen:
 python -m rips_ai session-screen /path/to/screenshot.png
 ```
 
+`session-screen` also recognizes navigation-only states such as
+`whats_inside`, `pack_picker`, `vault_gallery`, and `vault_appraisal`. Those
+states print safe next steps and do not change tracked bank, vault, or pending
+pack state.
+
 On a pack screen, the tool only advises by default:
 
 ```bash
@@ -186,12 +191,15 @@ Open one live pack through the calibrated Shizuku gesture flow only when the
 main buy screen is visible:
 
 ```bash
+python -m rips_ai device-open-pack --pack one_dollar --dry-run
 python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
 ```
 
-This taps the lower `Buy for $1` button, spins the post-buy picker carousel,
-selects the centered pack, performs the stronger slice/reveal swipes, updates
-the session to pending, and returns to Codex by default.
+The dry run prints the exact Shizuku gesture sequence and planned session
+mutation without touching Rips or the tracker. The confirmed command taps the
+lower `Buy for $1` button, spins the post-buy picker carousel, selects the
+centered pack, performs the stronger slice/reveal swipes, updates the session
+to pending, and returns to Codex by default.
 
 Check the visible bank after a draw or app action:
 

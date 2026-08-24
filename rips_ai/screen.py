@@ -12,7 +12,17 @@ from typing import Literal
 from .core import cents_to_dollars, decide_revealed_card, dollars_to_cents
 
 
-ScreenState = Literal["pack", "pack_style", "result", "buyback", "unknown"]
+ScreenState = Literal[
+    "pack",
+    "pack_style",
+    "pack_picker",
+    "whats_inside",
+    "result",
+    "buyback",
+    "vault_gallery",
+    "vault_appraisal",
+    "unknown",
+]
 MONEY_RE = re.compile(r"\$?\s*([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)(?:\.(\d{1,2}))?")
 
 
@@ -114,10 +124,18 @@ def classify_screen_text(text: str) -> ScreenState:
         return "buyback"
     if "estimated payout odds" in compact or "choose your pack style" in compact:
         return "pack_style"
+    if "tap to select a pack to open" in compact:
+        return "pack_picker"
     if "sell" in compact and "vault" in compact:
         return "result"
+    if "my collection" in compact or ("collection" in compact and "price" in compact):
+        return "vault_gallery"
+    if "appraisal" in compact or "appraised value" in compact:
+        return "vault_appraisal"
     if "buy for" in compact or ("what's inside" in compact and "max pull" in compact):
         return "pack"
+    if "what's inside" in compact:
+        return "whats_inside"
     return "unknown"
 
 
