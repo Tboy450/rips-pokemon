@@ -97,7 +97,13 @@ Print the active workflow for the current tracked state:
 
 ```bash
 python -m rips_ai session-workflow
+python -m rips_ai session-diagnose --screen-state pack --bank 11.30 --vault 8.90 --vault-count 5
 ```
+
+Use `session-diagnose` when the operator can see the screen but Shizuku capture
+or context continuity is unreliable. It reports tracker drift and screen-specific
+next steps without mutating unless complete trusted totals are supplied with
+`--commit`.
 
 Use this after compaction, Shizuku failure, app interruption, or any Rips action.
 It prints the next stage-specific commands and includes the active bank
@@ -147,14 +153,17 @@ Use the calibrated live Shizuku flow only when the main buy screen is visible:
 
 ```bash
 python -m rips_ai device-open-pack --pack one_dollar --dry-run
-python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
+python -m rips_ai device-open-pack --pack one_dollar --stage tap-buy --confirmed-buy-screen --stay-in-rips
+python -m rips_ai device-open-pack --pack one_dollar --stage finish-open --purchase-observed
 ```
 
 The dry run prints the gesture sequence and planned session mutation without
-touching Rips. The confirmed command taps the lower orange buy button, spins
-the post-buy picker carousel once, selects the centered pack, performs the long
-slice plus fast follow-up swipe, marks the session pending, and returns to
-Codex by default.
+touching Rips. The live flow is intentionally staged. First tap only the lower
+orange buy button and leave Rips foreground for confirmation. Only after the
+post-buy picker/result flow is visibly reached should the second command run
+with `--purchase-observed`; that is the only `device-open-pack` path that marks
+the session pending. If the tap lands on `What's inside`, reconcile the tracker
+back to the visible app totals and do not use `--purchase-observed`.
 
 Verify visible bank after a draw, sell/buyback, vault, or return to the buy
 screen:

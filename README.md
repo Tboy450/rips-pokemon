@@ -111,6 +111,18 @@ vault gallery audit, pending result handling, sell buyback verification, or
 vault commit. Use it after any interruption or Shizuku failure before touching
 Rips again.
 
+When the app was interrupted or screenshot readback is unreliable, use a
+manual diagnosis from the visible app state:
+
+```bash
+python -m rips_ai session-diagnose --screen-state pack --bank 11.30 --vault 8.90 --vault-count 5
+python -m rips_ai session-diagnose --screen-state whats_inside --bank 11.30 --vault 8.90 --vault-count 5
+```
+
+`session-diagnose` prints screen-specific next steps plus tracker deltas. It
+does not change the session unless all trusted totals are supplied with
+`--commit`.
+
 Check the probability-adjusted `$1` pack plan before opening:
 
 ```bash
@@ -192,14 +204,19 @@ main buy screen is visible:
 
 ```bash
 python -m rips_ai device-open-pack --pack one_dollar --dry-run
-python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
+python -m rips_ai device-open-pack --pack one_dollar --stage tap-buy --confirmed-buy-screen --stay-in-rips
+python -m rips_ai device-open-pack --pack one_dollar --stage finish-open --purchase-observed
 ```
 
 The dry run prints the exact Shizuku gesture sequence and planned session
-mutation without touching Rips or the tracker. The confirmed command taps the
-lower `Buy for $1` button, spins the post-buy picker carousel, selects the
-centered pack, performs the stronger slice/reveal swipes, updates the session
-to pending, and returns to Codex by default.
+mutation without touching Rips or the tracker. The live command is staged so a
+missed tap on `What's inside` cannot silently deduct bank: first run
+`--stage tap-buy` and visually confirm the app reaches the post-buy picker or
+result flow. Only then run `--stage finish-open --purchase-observed`, or use
+`session-buy --purchase-confirmed` manually. Without `--purchase-observed`,
+`device-open-pack` sends gestures only and leaves bank/pending state unchanged.
+Use `--buy-tap X,Y` with `--dry-run` first when recalibrating the orange button
+coordinate.
 
 Check the visible bank after a draw or app action:
 

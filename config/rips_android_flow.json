@@ -12,7 +12,8 @@
       100,
       250
     ],
-    "require_manual_purchase_confirmation": true
+    "require_manual_purchase_confirmation": true,
+    "require_purchase_observed_for_tracker_mutation": true
   },
   "vault_gallery": {
     "notes": [

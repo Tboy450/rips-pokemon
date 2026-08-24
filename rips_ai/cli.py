@@ -33,6 +33,7 @@ from .ledger import (
 from .screen import (
     advice_from_observation,
     classify_image,
+    classify_screen_text,
     load_regions,
     observation_from_regions,
     observation_from_text,
@@ -198,6 +199,55 @@ def build_parser() -> argparse.ArgumentParser:
     session_workflow.add_argument("--session", type=Path, default=DEFAULT_SESSION)
     session_workflow.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     session_workflow.add_argument(
+        "--two-fifty-bank",
+        default=DEFAULT_TWO_FIFTY_BANK,
+        help="bank threshold that unlocks $2.50 packs",
+    )
+
+    session_diagnose = subparsers.add_parser(
+        "session-diagnose",
+        help="diagnose tracker drift from manually observed app state",
+    )
+    session_diagnose.add_argument("--session", type=Path, default=DEFAULT_SESSION)
+    session_diagnose.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    session_diagnose.add_argument(
+        "--screen-state",
+        choices=(
+            "pack",
+            "pack_style",
+            "pack_picker",
+            "whats_inside",
+            "result",
+            "buyback",
+            "vault_gallery",
+            "vault_appraisal",
+            "unknown",
+        ),
+        help="visible Rips screen state when OCR is unavailable",
+    )
+    session_diagnose.add_argument("--screen-text", help="visible/OCR text to classify")
+    session_diagnose.add_argument("--image", type=Path, help="screenshot to OCR/classify if available")
+    session_diagnose.add_argument("--bank", help="trusted visible bank value")
+    session_diagnose.add_argument("--vault", help="trusted visible vault total")
+    session_diagnose.add_argument("--vault-count", type=int, help="trusted visible vault card count")
+    session_diagnose.add_argument(
+        "--clear-pending",
+        action="store_true",
+        help="clear stale pending state because the app is visibly resolved",
+    )
+    session_diagnose.add_argument(
+        "--count-cleared-pending",
+        action="store_true",
+        help="increment opened count when the stale pending pack really completed",
+    )
+    session_diagnose.add_argument("--opened-count", type=int, help="trusted total opened count")
+    session_diagnose.add_argument("--source", default="manual workflow diagnosis")
+    session_diagnose.add_argument(
+        "--commit",
+        action="store_true",
+        help="write the observed bank/vault/count values into the live session",
+    )
+    session_diagnose.add_argument(
         "--two-fifty-bank",
         default=DEFAULT_TWO_FIFTY_BANK,
         help="bank threshold that unlocks $2.50 packs",
@@ -418,9 +468,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="required; confirms Rips is on the main pack buy screen, not What's inside",
     )
     device_open.add_argument(
+        "--purchase-observed",
+        action="store_true",
+        help=(
+            "only mutate the tracker after the app visibly reaches the post-buy "
+            "picker/result flow"
+        ),
+    )
+    device_open.add_argument(
         "--dry-run",
         action="store_true",
         help="print the gesture sequence and planned session mutation without running Shizuku",
+    )
+    device_open.add_argument(
+        "--stage",
+        choices=("full", "tap-buy", "finish-open"),
+        default="full",
+        help="run the full flow, only the buy tap, or only the post-buy picker/slice flow",
+    )
+    device_open.add_argument(
+        "--buy-tap",
+        help="override the buy tap as X,Y for the visible layout",
     )
     device_open.add_argument(
         "--stay-in-rips",
@@ -993,10 +1061,15 @@ def command_session_workflow(args: argparse.Namespace) -> int:
         print(f"  python -m rips_ai session-plan --pack {pack.id}")
         print("next: review the exact device gesture plan without touching Rips")
         print(f"  python -m rips_ai device-open-pack --pack {pack.id} --dry-run")
-        print("next: open only from the confirmed main buy screen")
+        print("next: tap only the orange Buy button from the confirmed main buy screen")
         print(
             "  python -m rips_ai device-open-pack "
-            f"--pack {pack.id} --confirmed-buy-screen"
+            f"--pack {pack.id} --stage tap-buy --confirmed-buy-screen --stay-in-rips"
+        )
+        print("next: after the post-buy picker/result is visibly reached, finish opening")
+        print(
+            "  python -m rips_ai device-open-pack "
+            f"--pack {pack.id} --stage finish-open --purchase-observed"
         )
         print("manual fallback after the app accepts the buy/open step:")
         print(f"  python -m rips_ai session-buy --pack {pack.id} --purchase-confirmed")
@@ -1040,6 +1113,145 @@ def command_session_workflow(args: argparse.Namespace) -> int:
     print("stage: result_value_recorded_without_action")
     print("next: rerun result advice from the recorded value")
     print(f"  python -m rips_ai session-result --card-value {cents_to_dollars(pending.card_value_cents)}")
+    return 0
+
+
+def _diagnose_screen_state(args: argparse.Namespace) -> str | None:
+    modes = [
+        args.screen_state is not None,
+        args.screen_text is not None,
+        args.image is not None,
+    ]
+    if sum(1 for enabled in modes if enabled) > 1:
+        raise ValueError("provide only one of --screen-state, --screen-text, or --image")
+    if args.screen_state is not None:
+        return args.screen_state
+    if args.screen_text is not None:
+        return classify_screen_text(args.screen_text)
+    if args.image is not None:
+        state, _ = classify_image(args.image)
+        return state
+    return None
+
+
+def _print_diagnose_state_guidance(state: str, session: LiveSession, pack_id: str) -> None:
+    print(f"visible screen: {state}")
+    if state in {
+        "pack_style",
+        "pack_picker",
+        "whats_inside",
+        "vault_gallery",
+        "vault_appraisal",
+    }:
+        _handle_session_navigation_screen(state)
+        return
+    if state == "pack":
+        if session.pending is None:
+            print("action: verify bank, dry-run gestures, then tap Buy only from the orange button")
+            print("next: python -m rips_ai device-open-pack --stage tap-buy --pack "
+                  f"{pack_id} --confirmed-buy-screen --stay-in-rips")
+        else:
+            print("action: wait")
+            print("reason: tracker already has a pending pack")
+        return
+    if state == "result":
+        print("action: read card value")
+        print("next: python -m rips_ai session-result --card-value VALUE")
+        return
+    if state == "buyback":
+        print("action: verify buyback")
+        print("next: python -m rips_ai session-buyback --amount VALUE --commit")
+        return
+    print("action: wait")
+    print("reason: screen state is unknown; reconcile only from trusted visible totals")
+
+
+def command_session_diagnose(args: argparse.Namespace) -> int:
+    try:
+        session = _load_session(args.session)
+        state = _diagnose_screen_state(args)
+        observed_bank = dollars_to_cents(args.bank) if args.bank is not None else None
+        observed_vault = dollars_to_cents(args.vault) if args.vault is not None else None
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if args.vault_count is not None and args.vault_count < 0:
+        print("--vault-count cannot be negative", file=sys.stderr)
+        return 1
+    if args.opened_count is not None and args.opened_count < 0:
+        print("--opened-count cannot be negative", file=sys.stderr)
+        return 1
+    if args.count_cleared_pending and not args.clear_pending:
+        print("--count-cleared-pending requires --clear-pending", file=sys.stderr)
+        return 1
+
+    print("diagnose: live session")
+    _print_session(session)
+    if state is not None:
+        _print_diagnose_state_guidance(state, session, "one_dollar")
+
+    has_any_total = (
+        observed_bank is not None
+        or observed_vault is not None
+        or args.vault_count is not None
+    )
+    has_all_totals = (
+        observed_bank is not None
+        and observed_vault is not None
+        and args.vault_count is not None
+    )
+    if has_any_total:
+        print("observed totals:")
+        if observed_bank is not None:
+            print(f"  bank: {cents_to_dollars(observed_bank)}")
+            print(f"  bank delta: {cents_to_dollars(observed_bank - session.bank_cents)}")
+        if observed_vault is not None:
+            print(f"  vault: {cents_to_dollars(observed_vault)}")
+            print(f"  vault delta: {cents_to_dollars(observed_vault - session.vault_cents)}")
+        if args.vault_count is not None:
+            print(f"  vault cards: {args.vault_count}")
+            print(f"  vault card delta: {args.vault_count - session.vault_count:+d}")
+
+    if args.commit:
+        if not has_all_totals:
+            print(
+                "--commit requires --bank, --vault, and --vault-count",
+                file=sys.stderr,
+            )
+            return 1
+        event = commit_state_reconciliation(
+            session=session,
+            observed_bank_cents=observed_bank,
+            observed_vault_cents=observed_vault,
+            observed_vault_count=args.vault_count,
+            clear_pending=args.clear_pending,
+            count_cleared_pending=args.count_cleared_pending,
+            observed_opened_count=args.opened_count,
+            source=args.source,
+        )
+        save_live_session(args.session, session)
+        print("committed: state reconciliation")
+        print(f"history event: {event['type']}")
+        _print_session(session)
+        return 0
+
+    print("session mutation: none")
+    if has_all_totals:
+        command = (
+            "python -m rips_ai session-diagnose "
+            f"--bank {cents_to_dollars(observed_bank)} "
+            f"--vault {cents_to_dollars(observed_vault)} "
+            f"--vault-count {args.vault_count}"
+        )
+        if args.clear_pending:
+            command += " --clear-pending"
+        if args.count_cleared_pending:
+            command += " --count-cleared-pending"
+        print(f"next: rerun with --commit after verifying visible totals")
+        print(f"  {command} --commit")
+    else:
+        print("next: provide trusted --bank, --vault, and --vault-count to reconcile")
     return 0
 
 
@@ -1618,7 +1830,26 @@ def _point(value: object, gesture_name: str) -> tuple[int, int]:
     return int(value[0]), int(value[1])
 
 
-def _tap_command(flow: dict[str, object], name: str) -> str:
+def _parse_point_override(value: str | None, name: str) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    pieces = [piece.strip() for piece in value.split(",")]
+    if len(pieces) != 2:
+        raise ValueError(f"{name} must use X,Y format")
+    try:
+        return int(pieces[0]), int(pieces[1])
+    except ValueError as exc:
+        raise ValueError(f"{name} must use integer X,Y coordinates") from exc
+
+
+def _tap_command(
+    flow: dict[str, object],
+    name: str,
+    override: tuple[int, int] | None = None,
+) -> str:
+    if override is not None:
+        x, y = override
+        return f"input tap {x} {y}"
     gesture = _gesture(flow, name)
     x, y = _point(gesture.get("at"), name)
     return f"input tap {x} {y}"
@@ -1638,13 +1869,28 @@ def _open_pack_sequence(
     return_package: str,
     stay_in_rips: bool,
     picker_spin: str,
+    stage: str,
+    buy_tap: tuple[int, int] | None = None,
 ) -> str:
     commands = [
         f"am start -n {shlex.quote(activity)} >/dev/null",
         "sleep 1",
-        _tap_command(flow, "tap_buy"),
-        "sleep 3",
     ]
+    if stage in {"full", "tap-buy"}:
+        commands.extend([_tap_command(flow, "tap_buy", buy_tap), "sleep 3"])
+    if stage == "tap-buy":
+        if not stay_in_rips:
+            commands.extend(
+                [
+                    f"monkey -p {shlex.quote(return_package)} 1 >/dev/null",
+                    "sleep 1",
+                ]
+            )
+        commands.append(
+            "dumpsys window | grep -E \"mCurrentFocus|mFocusedApp\" | head -n 5"
+        )
+        return "; ".join(commands)
+
     if picker_spin in {"left", "both"}:
         commands.extend([_swipe_command(flow, "spin_picker_left"), "sleep 0.8"])
     if picker_spin in {"right", "both"}:
@@ -1677,14 +1923,21 @@ def _print_open_pack_dry_run(
     pack,
     command: str,
     confirmed_buy_screen: bool,
+    purchase_observed: bool,
+    stage: str,
 ) -> None:
     print("dry-run: device-open-pack")
+    print(f"stage: {stage}")
     print(f"pack: {pack.name} ({pack.id})")
     print(f"price: {cents_to_dollars(pack.price_cents)}")
     print(f"tracked bank before: {cents_to_dollars(session.bank_cents)}")
     print(f"planned bank after buy: {cents_to_dollars(session.bank_cents - pack.price_cents)}")
     print(f"planned pending: {pack.id} at {cents_to_dollars(pack.price_cents)}")
     print("session mutation: none during dry run")
+    if purchase_observed:
+        print("purchase observation: tracker would be allowed to mark pending")
+    else:
+        print("purchase observation: not supplied; execution would not mutate tracker")
     if confirmed_buy_screen:
         print("screen confirmation: main buy screen confirmed")
     else:
@@ -1838,35 +2091,39 @@ def command_device_vault_gallery_plan(args: argparse.Namespace) -> int:
 
 
 def command_device_open_pack(args: argparse.Namespace) -> int:
-    if not args.confirmed_buy_screen and not args.dry_run:
+    if args.stage in {"full", "tap-buy"} and not args.confirmed_buy_screen and not args.dry_run:
         print("action: wait")
         print("reason: --confirmed-buy-screen is required before tapping Buy")
         return 0
 
     try:
         session = _load_session(args.session)
-        if session.pending is not None:
+        if session.pending is not None and args.stage in {"full", "tap-buy"}:
             raise ValueError("finish the pending pack before buying another")
 
         pack = find_pack(load_packs(args.config), args.pack)
         two_fifty_bank = dollars_to_cents(args.two_fifty_bank)
-        locked_reason = _pack_unlock_reason(session, pack, two_fifty_bank)
-        if locked_reason is not None:
-            raise ValueError(locked_reason)
-        if session.bank_cents - pack.price_cents < session.min_bank_cents:
-            raise ValueError(
-                "buying would leave "
-                f"{cents_to_dollars(session.bank_cents - pack.price_cents)}, below floor "
-                f"{cents_to_dollars(session.min_bank_cents)}"
-            )
+        if args.stage in {"full", "tap-buy"}:
+            locked_reason = _pack_unlock_reason(session, pack, two_fifty_bank)
+            if locked_reason is not None:
+                raise ValueError(locked_reason)
+            if session.bank_cents - pack.price_cents < session.min_bank_cents:
+                raise ValueError(
+                    "buying would leave "
+                    f"{cents_to_dollars(session.bank_cents - pack.price_cents)}, below floor "
+                    f"{cents_to_dollars(session.min_bank_cents)}"
+                )
 
         flow = _load_flow(args.flow)
+        buy_tap = _parse_point_override(args.buy_tap, "--buy-tap")
         command = _open_pack_sequence(
             flow=flow,
             activity=args.activity,
             return_package=args.return_package,
             stay_in_rips=args.stay_in_rips,
             picker_spin=args.picker_spin,
+            stage=args.stage,
+            buy_tap=buy_tap,
         )
         if args.dry_run:
             _print_open_pack_dry_run(
@@ -1874,18 +2131,38 @@ def command_device_open_pack(args: argparse.Namespace) -> int:
                 pack=pack,
                 command=command,
                 confirmed_buy_screen=args.confirmed_buy_screen,
+                purchase_observed=args.purchase_observed,
+                stage=args.stage,
             )
             return 0
         output = run_shizuku_shell(command, timeout_seconds=args.timeout)
-        begin_pending_pack(session, pack.id, pack.price_cents)
-        save_live_session(args.session, session)
+        mutated = False
+        if args.purchase_observed:
+            if session.pending is None:
+                begin_pending_pack(session, pack.id, pack.price_cents)
+                save_live_session(args.session, session)
+                mutated = True
+            else:
+                print("tracker: existing pending pack kept; no second deduction")
     except (FileNotFoundError, DeviceAccessError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    print(f"opened: {pack.name} ({pack.id})")
-    print(f"bank after buy: {cents_to_dollars(session.bank_cents)}")
-    print(f"pending: {pack.id} at {cents_to_dollars(pack.price_cents)}")
+    print(f"sent: device-open-pack ({args.stage})")
+    print(f"pack: {pack.name} ({pack.id})")
+    if args.purchase_observed and mutated:
+        print("purchase observed: tracker marked pending")
+        print(f"bank after buy: {cents_to_dollars(session.bank_cents)}")
+        print(f"pending: {pack.id} at {cents_to_dollars(pack.price_cents)}")
+    elif args.purchase_observed:
+        print("purchase observed: tracker already had pending state")
+    else:
+        print("session mutation: none")
+        print(
+            "next: only after the app visibly reaches the post-buy picker/result, "
+            "run session-buy --pack "
+            f"{pack.id} --purchase-confirmed or rerun with --purchase-observed"
+        )
     if args.stay_in_rips:
         print("foreground: Rips requested")
     else:
@@ -1943,6 +2220,7 @@ def main(argv: list[str] | None = None) -> int:
         "session-start": command_session_start,
         "session-status": command_session_status,
         "session-workflow": command_session_workflow,
+        "session-diagnose": command_session_diagnose,
         "session-bank-check": command_session_bank_check,
         "session-vault-audit": command_session_vault_audit,
         "session-reconcile": command_session_reconcile,

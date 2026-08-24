@@ -3,6 +3,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from rips_ai.cli import main
@@ -35,6 +36,40 @@ class CliSessionLedgerTests(unittest.TestCase):
                             ],
                         },
                     ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def write_flow_config(self, path: Path) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "gestures": {
+                        "tap_buy": {"at": [540, 1950]},
+                        "spin_picker_left": {
+                            "from": [820, 1220],
+                            "to": [260, 1220],
+                            "duration_ms": 600,
+                        },
+                        "spin_picker_right": {
+                            "from": [260, 1220],
+                            "to": [820, 1220],
+                            "duration_ms": 600,
+                        },
+                        "tap_center_pack": {"at": [540, 1220]},
+                        "slice_left_to_right": {
+                            "from": [60, 1240],
+                            "to": [1020, 1240],
+                            "duration_ms": 700,
+                        },
+                        "speed_up_reveal_swipe": {
+                            "from": [60, 1320],
+                            "to": [1020, 1320],
+                            "duration_ms": 250,
+                            "delay_ms": 350,
+                        },
+                    }
                 }
             ),
             encoding="utf-8",
@@ -762,6 +797,58 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertTrue(loaded.history[-1]["cleared_pending"])
         self.assertTrue(loaded.history[-1]["counted_cleared_pending"])
 
+    def test_session_diagnose_reports_screen_and_totals_without_mutation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            session = root / "session.json"
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "11.30",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "session-diagnose",
+                        "--session",
+                        str(session),
+                        "--screen-state",
+                        "whats_inside",
+                        "--bank",
+                        "11.30",
+                        "--vault",
+                        "8.90",
+                        "--vault-count",
+                        "5",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1130)
+        self.assertIsNone(loaded.pending)
+        text = output.getvalue()
+        self.assertIn("visible screen: whats_inside", text)
+        self.assertIn("action: go back", text)
+        self.assertIn("session mutation: none", text)
+
     def test_session_workflow_ready_includes_bank_and_vault_checks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -806,7 +893,8 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertIn("session-bank-check --bank VALUE", text)
         self.assertIn("session-vault-audit --card-values VALUE", text)
         self.assertIn("device-open-pack --pack one_dollar --dry-run", text)
-        self.assertIn("device-open-pack --pack one_dollar --confirmed-buy-screen", text)
+        self.assertIn("device-open-pack --pack one_dollar --stage tap-buy --confirmed-buy-screen", text)
+        self.assertIn("device-open-pack --pack one_dollar --stage finish-open --purchase-observed", text)
 
     def test_session_workflow_pending_sell_includes_buyback_and_bank_check(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -965,6 +1053,176 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertIn("session mutation: none during dry run", text)
         self.assertIn("execution still requires --confirmed-buy-screen", text)
         self.assertIn("input tap 540 1950", text)
+
+    def test_device_open_pack_without_purchase_observed_does_not_mutate_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            flow = root / "flow.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+            self.write_flow_config(flow)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "11.30",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+
+            output = io.StringIO()
+            with mock.patch("rips_ai.cli.run_shizuku_shell", return_value="focus ok"):
+                with contextlib.redirect_stdout(output):
+                    result = main(
+                        [
+                            "device-open-pack",
+                            "--session",
+                            str(session),
+                            "--config",
+                            str(config),
+                            "--flow",
+                            str(flow),
+                            "--pack",
+                            "one_dollar",
+                            "--confirmed-buy-screen",
+                        ]
+                    )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1130)
+        self.assertIsNone(loaded.pending)
+        text = output.getvalue()
+        self.assertIn("sent: device-open-pack (full)", text)
+        self.assertIn("session mutation: none", text)
+        self.assertIn("purchase-confirmed", text)
+
+    def test_device_open_pack_purchase_observed_mutates_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            flow = root / "flow.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+            self.write_flow_config(flow)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "11.30",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+
+            output = io.StringIO()
+            with mock.patch("rips_ai.cli.run_shizuku_shell", return_value="focus ok"):
+                with contextlib.redirect_stdout(output):
+                    result = main(
+                        [
+                            "device-open-pack",
+                            "--session",
+                            str(session),
+                            "--config",
+                            str(config),
+                            "--flow",
+                            str(flow),
+                            "--pack",
+                            "one_dollar",
+                            "--confirmed-buy-screen",
+                            "--purchase-observed",
+                        ]
+                    )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1030)
+        self.assertIsNotNone(loaded.pending)
+        text = output.getvalue()
+        self.assertIn("purchase observed: tracker marked pending", text)
+
+    def test_device_open_pack_dry_run_accepts_buy_tap_override(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "packs.json"
+            flow = root / "flow.json"
+            session = root / "session.json"
+            self.write_pack_config(config)
+            self.write_flow_config(flow)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "session-start",
+                            "--session",
+                            str(session),
+                            "--bank",
+                            "11.30",
+                            "--vault",
+                            "8.90",
+                            "--vault-count",
+                            "5",
+                            "--force",
+                        ]
+                    ),
+                    0,
+                )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = main(
+                    [
+                        "device-open-pack",
+                        "--session",
+                        str(session),
+                        "--config",
+                        str(config),
+                        "--flow",
+                        str(flow),
+                        "--pack",
+                        "one_dollar",
+                        "--confirmed-buy-screen",
+                        "--stage",
+                        "tap-buy",
+                        "--buy-tap",
+                        "540,1990",
+                        "--dry-run",
+                    ]
+                )
+
+            loaded = load_live_session(session)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(loaded.bank_cents, 1130)
+        self.assertIsNone(loaded.pending)
+        text = output.getvalue()
+        self.assertIn("stage: tap-buy", text)
+        self.assertIn("input tap 540 1990", text)
 
     def test_device_vault_gallery_plan_prints_card_points(self):
         with tempfile.TemporaryDirectory() as temp_dir:

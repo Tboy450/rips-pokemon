@@ -96,6 +96,17 @@ The intended loop is:
 6. Run `device-vault-gallery-plan` plus `session-vault-audit` periodically or
    whenever tracked vault totals look wrong.
 
+If Shizuku capture is unreliable or a tap lands on the wrong screen, diagnose
+from manually observed state instead of guessing:
+
+```bash
+python -m rips_ai session-diagnose --screen-state whats_inside --bank 11.30 --vault 8.90 --vault-count 5
+python -m rips_ai session-diagnose --screen-state pack --bank 11.30 --vault 8.90 --vault-count 5 --commit
+```
+
+Only use `--commit` when the visible bank, vault total, and vault count are all
+trusted.
+
 Read a result screen and decide against a known vault:
 
 ```bash
@@ -156,15 +167,21 @@ Live open path:
 
 ```bash
 python -m rips_ai device-open-pack --pack one_dollar --dry-run
-python -m rips_ai device-open-pack --pack one_dollar --confirmed-buy-screen
+python -m rips_ai device-open-pack --pack one_dollar --stage tap-buy --confirmed-buy-screen --stay-in-rips
+python -m rips_ai device-open-pack --pack one_dollar --stage finish-open --purchase-observed
 ```
 
 Use the dry run first to review the exact Shizuku shell sequence and planned
-session mutation. Execute only when the main pack buy screen is visible. The
-confirmed command taps the lower orange buy button, spins the post-buy picker
-carousel once, taps the centered pack, performs the calibrated long slice plus
-fast follow-up swipe, updates the session to pending, and returns to Codex
-unless `--stay-in-rips` is supplied.
+session mutation. Execute the buy tap only when the main pack buy screen is
+visible. The staged flow prevents a bad tap on `What's inside` from silently
+deducting bank: `--stage tap-buy` sends only the orange-button tap and leaves
+Rips foreground for visual confirmation. After the app visibly reaches the
+post-buy picker/result flow, `--stage finish-open --purchase-observed` spins
+the picker, taps the centered pack, performs the calibrated long slice plus
+fast follow-up swipe, marks the session pending, and returns to Codex by
+default. Without `--purchase-observed`, the command sends gestures only and
+does not mutate the tracker. Use `--buy-tap X,Y` with `--dry-run` first when
+recalibrating the orange button coordinate.
 
 Bank verification after a draw:
 
