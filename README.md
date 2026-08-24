@@ -231,21 +231,117 @@ If `device-capture` times out, Android is still blocking Codex to Shizuku commun
 
 ## Next Best Upgrade Steps
 
-1. Fix Android screenshot readback so `device-capture` produces a locally
-   readable, CRC-valid PNG without hanging on Shizuku chunk reads.
-2. Add screen-state verification before every gesture step, especially
-   distinguishing the main pack carousel from the `What's inside` carousel and
-   the post-buy pack picker.
-3. Add a result-screen loop that waits for the revealed card value, advises
-   `sell` or `vault`, then keeps the session pending until the user confirms
-   the in-app action.
-4. Add a buyback confirmation flow that verifies the offer amount before
-   accepting or committing bank changes.
-5. Turn the vault gallery plan into a state-aware appraisal loop: long-press
-   each gallery card, read the appraised value, close the detail sheet, scroll
-   to the next page, and reconcile with `session-vault-audit`.
-6. Start logging every real pull to `data/outcomes.jsonl`, then export an
-   observed pack config once there are enough samples to replace demo odds.
+The next phase should make the advisor more screen-aware without letting it
+silently spend money or rewrite tracked state. The main theme is to turn the
+current manual checkpoints into small verified loops: identify the screen,
+perform exactly one allowed action, read the result, compare it to the session
+tracker, then require confirmation before committing anything risky.
+
+1. Make Android screenshot readback reliable.
+   `device-capture` needs a transfer path that consistently produces a locally
+   readable, CRC-valid PNG. The Shizuku wrapper can corrupt raw PNG streams, and
+   chunked base64 readback has hung mid-file, so try a bounded text transfer
+   with retries, per-chunk timeouts, and a final PNG validation step. When this
+   is stable, every live command can capture before and after its gesture and
+   store evidence under `data/` for debugging.
+
+2. Add screen-state verification before every gesture.
+   The program should distinguish the main pack carousel, `What's inside`
+   carousel, post-buy pack picker, pack slice screen, reveal animation, card
+   result screen, buyback sheet, vault gallery, and appraisal/detail sheet.
+   A command should refuse to tap when the observed state does not match the
+   requested action. This directly prevents the previous mistake where a center
+   tap opened the wrong carousel.
+
+3. Convert `device-open-pack` into a state-machine flow.
+   Instead of one timed Shizuku shell string, split the live open into steps:
+   launch or focus Rips, verify the main buy screen, tap the lower orange buy
+   button, wait for the post-buy picker, spin the picker once, select the
+   centered pack, verify the slice screen, perform the long slice and fast
+   follow-up swipe, then wait for the result screen. Each step should have a
+   timeout, a visible-state check, and a clear recovery message.
+
+4. Diagnose bank after each draw and resolution.
+   `session-bank-check` is the manual start. The next implementation should
+   read the bank chip automatically after a buy, sell/buyback, vault action, and
+   return to the buy screen. The command should report expected bank, observed
+   bank, delta, pending pack state, and likely reason for the difference. It
+   should not reconcile with `--commit` unless the visible bank was captured
+   from a trusted screen.
+
+5. Add a result-screen wait and decision loop.
+   After opening a pack, the assistant should wait until the revealed card value
+   is readable, run the existing sell/vault rule, and keep the session pending.
+   If the value is above the pack cost, it should instruct or prepare a Vault
+   action. If the value is at or below cost, it should instruct or prepare a
+   Sell action. In both cases, the actual session commit should still happen
+   only after the in-app action is confirmed.
+
+6. Add a guarded buyback confirmation flow.
+   The buyback sheet should be read before accepting. If the offer does not
+   match the expected sell value, the assistant should stop and explain the
+   mismatch. Once the value matches, a later guarded command can tap Accept and
+   then run `session-bank-check` to confirm the bank increased by the expected
+   amount before committing the sell.
+
+7. Turn the vault gallery plan into a state-aware appraisal loop.
+   `device-vault-gallery-plan` currently prints the long-press grid. The next
+   version should verify the vault gallery, long-press one card, read the
+   appraisal/detail value, close the detail sheet, confirm it returned to the
+   gallery, and continue through every visible slot and page. Required
+   calibration inputs are `first_card_center`, `x_step`, `y_step`, `columns`,
+   `rows`, `pages`, `long_press_ms`, close/back behavior, scroll gesture, and
+   the appraisal value OCR crop.
+
+8. Reconcile tracked vault totals against gallery appraisals.
+   After the gallery loop collects values, it should feed the total and card
+   count into `session-vault-audit`. The audit should show tracked total,
+   observed total, tracked count, observed count, value delta, and count delta.
+   This becomes the correction mechanism when a previous Vault action was
+   missed, double-counted, or appraised differently by the app later.
+
+9. Improve OCR calibration and fallback parsing.
+   Add per-region confidence checks, alternate crop boxes, and multiple OCR
+   passes for the bank chip, card value, buyback value, and vault appraisal
+   value. Keep manual override flags for every money value because screenshots
+   and UI dumps will sometimes be wrong. Store raw OCR text with the audit event
+   so incorrect reads can be diagnosed later.
+
+10. Build a replayable screen fixture suite.
+    Save representative screenshots for each app state and use them as tests:
+    main pack carousel, `What's inside`, picker, slice, reveal, result, buyback,
+    vault gallery, and appraisal detail. Tests should assert both
+    classification and the next allowed action. This will make future gesture
+    changes safer without needing Shizuku running.
+
+11. Expand observed outcome logging.
+    Every completed pull should append a ledger event with pack id, pack cost,
+    card value, action, bank before/after, vault before/after, vault count,
+    source method, and any OCR/manual notes. Once enough real pulls exist,
+    export `data/packs.observed.json` and compare observed value distribution
+    against the placeholder config.
+
+12. Add bankroll policy experiments.
+    The current tier rule is simple: stay on `$1` packs until the configured
+    `$2.50` unlock bank. Later strategy code can compare policies such as
+    stricter cash floors, different `$2.50` unlock thresholds, stop-loss
+    limits, max packs per session, and vault-only profit targets. These should
+    run in simulation first and only become live recommendations after enough
+    observed data exists.
+
+13. Add command dry-run and explain modes everywhere.
+    Any command that can tap, commit, or reconcile should have a dry-run path
+    that prints the exact action, expected screen, expected money change, and
+    session mutation before doing it. This makes it easier to review the flow
+    during Shizuku outages and prevents compacted sessions from guessing hidden
+    state.
+
+14. Improve handoff and recovery notes.
+    Keep `docs/PROJECT_CONTEXT.md` updated with the last known real bank, vault
+    total, vault card count, pending pack, foreground app assumption, and known
+    Shizuku status. When automation stops mid-flow, the next session should be
+    able to run `session-status`, `session-bank-check`, and
+    `session-vault-audit` to recover before taking another app action.
 
 ## Important Assumption
 
