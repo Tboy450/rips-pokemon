@@ -46,18 +46,18 @@ The current implementation is advisor-first. It should not tap purchases automat
 At the time this context was written, the local working session was:
 
 ```text
-bank: $10.30
-vault: $11.90
-vault cards: 6
+bank: $14.00
+vault: $6.80
+vault cards: 2
 cash floor: $10.00
-opened: 2
+opened: 1
 pending: none
 ```
 
 Recreate that state on a new device with:
 
 ```bash
-python -m rips_ai session-start --bank 10.30 --vault 11.90 --vault-count 6 --min-bank 10 --force
+python -m rips_ai session-start --bank 14.00 --vault 6.80 --vault-count 2 --min-bank 10 --force
 ```
 
 If the real app state has changed, start with the current real bank and vault instead.

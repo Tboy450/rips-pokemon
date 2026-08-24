@@ -28,7 +28,20 @@
         { "value_cents": 5000, "weight": 0.9, "label": "rare pull" },
         { "value_cents": 15000, "weight": 0.1, "label": "chase pull" }
       ]
+    },
+    {
+      "id": "five_dollar",
+      "name": "$5 pack",
+      "price_cents": 500,
+      "outcomes": [
+        { "value_cents": 50, "weight": 25, "label": "low value" },
+        { "value_cents": 200, "weight": 35, "label": "low value" },
+        { "value_cents": 500, "weight": 25, "label": "break-even" },
+        { "value_cents": 1000, "weight": 10, "label": "small gain" },
+        { "value_cents": 2500, "weight": 4, "label": "good pull" },
+        { "value_cents": 10000, "weight": 0.9, "label": "rare pull" },
+        { "value_cents": 30000, "weight": 0.1, "label": "chase pull" }
+      ]
     }
   ]
 }
-

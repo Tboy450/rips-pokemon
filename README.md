@@ -139,6 +139,10 @@ python -m rips_ai session-plan --pack two_fifty
 python -m rips_ai session-recommend --two-fifty-bank 16
 ```
 
+`five_dollar` is present in the sample pack config so accidental or manual `$5`
+buys can be tracked with the correct cost, but it is not selected by the default
+bankroll-tier recommender.
+
 Use one screenshot and let the tool classify the current Rips screen:
 
 ```bash
