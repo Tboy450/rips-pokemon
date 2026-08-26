@@ -257,30 +257,35 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
 
 ## What To Improve Next
 
-1. Make Android screenshot readback reliable. The Shizuku wrapper can corrupt
-   raw PNG streams, and chunked base64 readback can hang mid-file, so
-   `device-capture` needs a faster validated transfer path.
-2. Add screen-state verification before gestures. The assistant must
-   distinguish the main pack carousel, the `What's inside` carousel, the
-   post-buy picker carousel, the slice screen, the result screen, and buyback
-   sheets before tapping.
-3. Convert `device-open-pack` into a state-machine flow: tap the lower buy
-   button, wait for the post-buy picker, use two fast long carousel spins in
-   the same direction, select the centered pack, slice with the long swipe plus
-   fast follow-up, then wait for result.
-4. Add a result/buyback loop that reads the card value, advises `sell` or
-   `vault`, and only commits after the in-app action is confirmed.
-   When individual vault card values are known, compare against the current
-   highest vault card. When they are unknown, use the pack-cost fallback and
-   schedule a gallery audit.
-5. Turn `device-vault-gallery-plan` into a state-aware appraisal loop. Required
-   calibration parameters: top-left card center, grid columns/rows, center
-   spacing, page count, scroll gesture, long-press duration, close/back action,
-   and appraisal value OCR crop.
-6. Add collection-screen cross-checks to verify tracked vault value and card
-   count after vault actions.
-7. Collect enough real outcomes in `data/outcomes.jsonl`, then export
-   `data/packs.observed.json` to replace placeholder pack odds.
+1. Add a Shizuku-side fast controller. Send one compact Android shell
+   controller through Shizuku to wake/check unlock state, focus Rips, read
+   compact UI/window state, wait through `Loading Packs...`, run the calibrated
+   open gestures, and return concise logs. Use screenshots only when the fast
+   state is ambiguous or OCR is required.
+2. Make the project less monolithic. Before adding more automation, split the
+   large CLI/device flow into smaller modules for Android state probing,
+   screenshot evidence, pack-opening gestures, session mutation, and CLI
+   formatting. Keep public commands stable while moving code.
+3. Keep screenshots as fallback evidence. Screenshot readback should remain
+   reliable, but it should not drive every live step. Capture PNGs for failure
+   diagnosis, risky transitions, and OCR-only values such as card, bank,
+   buyback, and vault appraisal amounts.
+4. Add verified state checks before gestures. The assistant must distinguish
+   the main pack carousel, `What's inside`, post-buy picker, slice screen,
+   reveal/result, buyback sheet, vault gallery, and appraisal/detail sheet
+   before tapping.
+5. Convert `device-open-pack` into a resumable state machine: focus app, verify
+   buy screen, tap Buy, verify picker, spin/select, slice/reveal, wait for
+   result, then leave the session pending until the in-app result is resolved.
+6. Add the result and buyback decision loop. Read the card value, advise `sell`
+   or `vault`, verify buyback offers before accepting, and commit only after
+   the matching in-app action is confirmed.
+7. Turn `device-vault-gallery-plan` into a state-aware appraisal loop using
+   calibrated grid points, long-press appraisal reads, close/back behavior, and
+   `session-vault-audit` reconciliation.
+8. Build replayable fixtures and observed data. Save screenshots/UI dumps for
+   each app state, test classification and next allowed actions, then grow
+   `data/outcomes.jsonl` into an observed pack config.
 
 ## Safety Direction
 
