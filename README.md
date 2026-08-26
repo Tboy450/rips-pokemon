@@ -347,6 +347,13 @@ documented, and safe to resume.
 
 ## Step 2 Refactor Plan
 
+Status: implemented for the current Android and `device-open-pack` surface.
+`rips_ai/android_state.py` owns Shizuku/device-state command helpers,
+`rips_ai/evidence.py` owns screenshot capture and PNG validation,
+`rips_ai/open_flow.py` owns gesture and flow construction, and `rips_ai/device.py`
+remains as a compatibility re-export for older imports. `rips_ai/cli.py` now
+keeps command parsing, output formatting, and exit-code handling.
+
 The refactor should happen before adding much more live automation. Keep the
 CLI commands stable, move behavior behind smaller modules, and test each move
 before changing behavior.

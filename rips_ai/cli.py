@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import shlex
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -23,12 +22,21 @@ from .core import (
     round_to_record,
     run_session,
 )
-from .device import DeviceAccessError, capture_screenshot, run_shizuku_shell
+from .android_state import DeviceAccessError, run_shizuku_shell
+from .evidence import capture_screenshot
 from .ledger import (
     append_ledger_record,
     build_observed_pack_config,
     load_ledger_records,
     summarize_records_by_pack,
+)
+from .open_flow import (
+    gallery_plan_parameters as _gallery_plan_parameters,
+    gallery_shell_plan_lines as _gallery_shell_plan_lines,
+    load_flow as _load_flow,
+    open_pack_sequence as _open_pack_sequence,
+    parse_point_override as _parse_point_override,
+    tap_command as _tap_command,
 )
 from .screen import (
     advice_from_observation,
@@ -52,7 +60,7 @@ from .session import (
     save_live_session,
     start_live_session,
 )
-from .vault import build_gallery_points, parse_money_values
+from .vault import parse_money_values
 
 
 DEFAULT_CONFIG = Path("config/packs.example.json")
@@ -1852,148 +1860,6 @@ def _handle_session_buyback_screen(args: argparse.Namespace, session: LiveSessio
     return 0
 
 
-def _load_flow(path: Path) -> dict[str, object]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _gesture(flow: dict[str, object], name: str) -> dict[str, object]:
-    gestures = flow.get("gestures", {})
-    if not isinstance(gestures, dict) or name not in gestures:
-        raise ValueError(f"gesture {name!r} was not found in {DEFAULT_FLOW}")
-    item = gestures[name]
-    if not isinstance(item, dict):
-        raise ValueError(f"gesture {name!r} is not an object")
-    return item
-
-
-def _point(value: object, gesture_name: str) -> tuple[int, int]:
-    if (
-        not isinstance(value, list | tuple)
-        or len(value) != 2
-    ):
-        raise ValueError(f"gesture {gesture_name!r} has an invalid point")
-    return int(value[0]), int(value[1])
-
-
-def _parse_point_override(value: str | None, name: str) -> tuple[int, int] | None:
-    if value is None:
-        return None
-    pieces = [piece.strip() for piece in value.split(",")]
-    if len(pieces) != 2:
-        raise ValueError(f"{name} must use X,Y format")
-    try:
-        return int(pieces[0]), int(pieces[1])
-    except ValueError as exc:
-        raise ValueError(f"{name} must use integer X,Y coordinates") from exc
-
-
-def _tap_command(
-    flow: dict[str, object],
-    name: str,
-    override: tuple[int, int] | None = None,
-) -> str:
-    if override is not None:
-        x, y = override
-        return f"input tap {x} {y}"
-    gesture = _gesture(flow, name)
-    x, y = _point(gesture.get("at"), name)
-    return f"input tap {x} {y}"
-
-
-def _swipe_command(flow: dict[str, object], name: str) -> str:
-    gesture = _gesture(flow, name)
-    start_x, start_y = _point(gesture.get("from"), name)
-    end_x, end_y = _point(gesture.get("to"), name)
-    duration = int(gesture.get("duration_ms", 300))
-    return f"input swipe {start_x} {start_y} {end_x} {end_y} {duration}"
-
-
-def _repeated_swipe_commands(flow: dict[str, object], name: str) -> list[str]:
-    gesture = _gesture(flow, name)
-    repeat_count = max(1, int(gesture.get("repeat_count", 1)))
-    repeat_delay = int(gesture.get("repeat_delay_ms", 0)) / 1000
-    commands: list[str] = []
-    for index in range(repeat_count):
-        commands.append(_swipe_command(flow, name))
-        if index < repeat_count - 1 and repeat_delay > 0:
-            commands.append(f"sleep {repeat_delay:.2f}")
-    return commands
-
-
-def _gesture_delay_seconds(
-    flow: dict[str, object],
-    name: str,
-    key: str,
-    default_ms: int,
-) -> float:
-    return int(_gesture(flow, name).get(key, default_ms)) / 1000
-
-
-def _open_pack_sequence(
-    flow: dict[str, object],
-    activity: str,
-    return_package: str,
-    stay_in_rips: bool,
-    picker_spin: str,
-    stage: str,
-    buy_tap: tuple[int, int] | None = None,
-) -> str:
-    commands = [
-        f"am start -n {shlex.quote(activity)} >/dev/null",
-        "sleep 1",
-    ]
-    if stage in {"full", "tap-buy"}:
-        commands.extend([_tap_command(flow, "tap_buy", buy_tap), "sleep 3"])
-    if stage == "tap-buy":
-        if not stay_in_rips:
-            commands.extend(
-                [
-                    f"monkey -p {shlex.quote(return_package)} 1 >/dev/null",
-                    "sleep 1",
-                ]
-            )
-        commands.append(
-            "dumpsys window | grep -E \"mCurrentFocus|mFocusedApp\" | head -n 5"
-        )
-        return "; ".join(commands)
-
-    if picker_spin in {"left", "both"}:
-        commands.extend(
-            [
-                *_repeated_swipe_commands(flow, "spin_picker_left"),
-                f"sleep {_gesture_delay_seconds(flow, 'spin_picker_left', 'settle_ms', 1200):.2f}",
-            ]
-        )
-    if picker_spin in {"right", "both"}:
-        commands.extend(
-            [
-                *_repeated_swipe_commands(flow, "spin_picker_right"),
-                f"sleep {_gesture_delay_seconds(flow, 'spin_picker_right', 'settle_ms', 1200):.2f}",
-            ]
-        )
-    commands.extend(
-        [
-            _tap_command(flow, "tap_center_pack"),
-            "sleep 0.8",
-            _swipe_command(flow, "slice_left_to_right"),
-            f"sleep {_gesture(flow, 'speed_up_reveal_swipe').get('delay_ms', 350) / 1000:.2f}",
-            _swipe_command(flow, "speed_up_reveal_swipe"),
-            "sleep 5",
-        ]
-    )
-    if not stay_in_rips:
-        commands.extend(
-            [
-                f"monkey -p {shlex.quote(return_package)} 1 >/dev/null",
-                "sleep 1",
-            ]
-        )
-    commands.append(
-        "dumpsys window | grep -E \"mCurrentFocus|mFocusedApp\" | head -n 5"
-    )
-    return "; ".join(commands)
-
-
 def _print_open_pack_dry_run(
     session: LiveSession,
     pack,
@@ -2023,103 +1889,29 @@ def _print_open_pack_dry_run(
         print(f"  {step}")
 
 
-def _vault_gallery_config(flow: dict[str, object]) -> dict[str, object]:
-    gallery = flow.get("vault_gallery", {})
-    if not isinstance(gallery, dict):
-        return {}
-    return gallery
-
-
-def _gallery_int_arg(
-    args: argparse.Namespace,
-    attr: str,
-    gallery: dict[str, object],
-    key: str,
-) -> int:
-    value = getattr(args, attr)
-    if value is not None:
-        return int(value)
-    if key not in gallery:
-        raise ValueError(f"provide --{attr.replace('_', '-')} or set vault_gallery.{key}")
-    return int(gallery[key])
-
-
-def _gallery_first_point(args: argparse.Namespace, gallery: dict[str, object]) -> tuple[int, int]:
-    if args.first_x is not None and args.first_y is not None:
-        return args.first_x, args.first_y
-    if args.first_x is not None or args.first_y is not None:
-        raise ValueError("provide both --first-x and --first-y")
-
-    point = gallery.get("first_card_center")
-    if not isinstance(point, list | tuple) or len(point) != 2:
-        raise ValueError("provide --first-x/--first-y or set vault_gallery.first_card_center")
-    return int(point[0]), int(point[1])
-
-
-def _optional_swipe_command(flow: dict[str, object], name: str) -> str | None:
-    try:
-        return _swipe_command(flow, name)
-    except ValueError:
-        return None
-
-
-def _gallery_plan_parameters(args: argparse.Namespace) -> tuple[dict[str, int], tuple[object, ...], str | None]:
-    flow = _load_flow(args.flow)
-    gallery = _vault_gallery_config(flow)
-    first_x, first_y = _gallery_first_point(args, gallery)
-    parameters = {
-        "columns": _gallery_int_arg(args, "columns", gallery, "columns"),
-        "rows": _gallery_int_arg(args, "rows", gallery, "rows"),
-        "pages": _gallery_int_arg(args, "pages", gallery, "pages"),
-        "first_x": first_x,
-        "first_y": first_y,
-        "x_step": _gallery_int_arg(args, "x_step", gallery, "x_step"),
-        "y_step": _gallery_int_arg(args, "y_step", gallery, "y_step"),
-        "long_press_ms": _gallery_int_arg(args, "long_press_ms", gallery, "long_press_ms"),
-        "between_cards_ms": _gallery_int_arg(args, "between_cards_ms", gallery, "between_cards_ms"),
-    }
-    points = build_gallery_points(
-        columns=parameters["columns"],
-        rows=parameters["rows"],
-        pages=parameters["pages"],
-        first_x=parameters["first_x"],
-        first_y=parameters["first_y"],
-        x_step=parameters["x_step"],
-        y_step=parameters["y_step"],
-    )
-    scroll_command = _optional_swipe_command(flow, "vault_gallery_scroll_next")
-    return parameters, points, scroll_command
-
-
 def _print_gallery_shell_plan(
     parameters: dict[str, int],
     points: tuple[object, ...],
     scroll_command: str | None,
 ) -> None:
-    previous_page = 1
-    for point in points:
-        if point.page != previous_page:
-            if scroll_command is None:
-                print(f"# Page {point.page}: scroll gesture is not configured")
-            else:
-                print("# Scroll to next gallery page")
-                print(scroll_command)
-                print("sleep 0.8")
-            previous_page = point.page
-        print(f"# Card {point.index}: page {point.page}, row {point.row}, column {point.column}")
-        print(
-            "input swipe "
-            f"{point.x} {point.y} {point.x} {point.y} {parameters['long_press_ms']}"
-        )
-        print("sleep 0.6")
-        print("# Read/write down the appraisal value now")
-        print("input keyevent BACK")
-        print(f"sleep {parameters['between_cards_ms'] / 1000:.2f}")
+    for line in _gallery_shell_plan_lines(parameters, points, scroll_command):
+        print(line)
 
 
 def command_device_vault_gallery_plan(args: argparse.Namespace) -> int:
     try:
-        parameters, points, scroll_command = _gallery_plan_parameters(args)
+        parameters, points, scroll_command = _gallery_plan_parameters(
+            _load_flow(args.flow),
+            columns=args.columns,
+            rows=args.rows,
+            pages=args.pages,
+            first_x=args.first_x,
+            first_y=args.first_y,
+            x_step=args.x_step,
+            y_step=args.y_step,
+            long_press_ms=args.long_press_ms,
+            between_cards_ms=args.between_cards_ms,
+        )
     except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

@@ -289,6 +289,13 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
 
 ## Step 2 Modularization Plan
 
+Status: implemented for the current Android/open-pack surface. The repo now has
+`rips_ai/android_state.py` for Shizuku/device-state helpers,
+`rips_ai/evidence.py` for screenshots and PNG validation, and
+`rips_ai/open_flow.py` for gesture/open-flow construction. `rips_ai/device.py`
+is kept as a compatibility re-export, and `rips_ai/cli.py` delegates Android
+control details to the smaller modules.
+
 Do this as a refactor-only pass before adding another large live automation
 feature. Keep command names, flags, and current output stable while moving code.
 
