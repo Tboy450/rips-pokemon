@@ -23,7 +23,7 @@ from .core import (
     run_session,
 )
 from .android_state import DeviceAccessError, run_shizuku_shell
-from .evidence import capture_screenshot
+from .evidence import capture_screenshot, describe_png_frame
 from .ledger import (
     append_ledger_record,
     build_observed_pack_config,
@@ -554,6 +554,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     device_capture.add_argument("--output", type=Path, default=Path("data/latest_screen.png"))
     device_capture.add_argument("--remote-path", default="/sdcard/rips_ai_latest_screen.png")
+    device_capture.add_argument(
+        "--describe-frame",
+        action="store_true",
+        help="print PNG brightness/range diagnostics after capture",
+    )
+    device_capture.add_argument(
+        "--fail-on-blank",
+        action="store_true",
+        help="return a nonzero exit code when frame diagnostics indicate a blank screenshot",
+    )
 
     device_advise = subparsers.add_parser(
         "device-advise",
@@ -2039,16 +2049,40 @@ def command_device_open_pack(args: argparse.Namespace) -> int:
 def command_device_capture(args: argparse.Namespace) -> int:
     try:
         path = capture_screenshot(args.output, args.remote_path)
+        frame = describe_png_frame(path.read_bytes()) if args.describe_frame or args.fail_on_blank else None
     except DeviceAccessError as exc:
         print(str(exc), file=sys.stderr)
         return 1
     print(f"screenshot: {path}")
+    if frame is not None:
+        _print_frame_description(frame)
+        if args.fail_on_blank and frame.get("likely_blank"):
+            print("reason: captured screenshot appears blank")
+            return 2
     return 0
+
+
+def _print_frame_description(frame: dict[str, int | bool | str]) -> None:
+    print(
+        "frame: "
+        f"{frame['width']}x{frame['height']} "
+        f"bit_depth={frame['bit_depth']} color_type={frame['color_type']}"
+    )
+    print(f"frame supported: {'yes' if frame.get('supported') else 'no'}")
+    if frame.get("supported"):
+        print(
+            "frame brightness: "
+            f"min={frame['color_min']} max={frame['color_max']} "
+            f"range={frame['color_range']} mean={frame['color_mean']}"
+        )
+    print(f"frame blank: {'yes' if frame.get('likely_blank') else 'no'}")
+    print(f"frame reason: {frame['reason']}")
 
 
 def command_device_advise(args: argparse.Namespace) -> int:
     try:
         image = capture_screenshot(args.output, args.remote_path)
+        frame = describe_png_frame(image.read_bytes())
     except DeviceAccessError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -2064,6 +2098,10 @@ def command_device_advise(args: argparse.Namespace) -> int:
         expected_sell=args.expected_sell,
     )
     print(f"screenshot: {image}")
+    if frame.get("likely_blank"):
+        _print_frame_description(frame)
+        print("reason: captured screenshot appears blank; skipping OCR advice")
+        return 2
     return command_advise_screen(screen_args)
 
 

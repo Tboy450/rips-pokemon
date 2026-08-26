@@ -170,10 +170,17 @@ Live capture path:
 
 ```bash
 python -m rips_ai device-capture
+python -m rips_ai device-capture --describe-frame
+python -m rips_ai device-capture --fail-on-blank
 python -m rips_ai device-advise --state pack --pack-price 2.50 --min-bank 10
 python -m rips_ai device-advise --state result --pack-price 1.00
 python -m rips_ai device-advise --state buyback --expected-sell 0.30
 ```
+
+Use `--describe-frame` when diagnosing Shizuku screenshot failures. It reports
+whether the PNG has visible image variation or is a blank/flat frame. Use
+`--fail-on-blank` in scripts that should stop when Android returns a valid but
+unusable black screenshot.
 
 Live open path:
 

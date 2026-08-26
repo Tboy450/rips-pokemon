@@ -1367,6 +1367,127 @@ class CliSessionLedgerTests(unittest.TestCase):
         self.assertIn("gallery slots: 4", text)
         self.assertIn("card 4: page 1, row 2, column 2, center (150, 260)", text)
 
+    def test_device_capture_describe_frame_prints_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "screen.png"
+
+            def fake_capture(path, remote_path):
+                path.write_bytes(b"png")
+                return path
+
+            frame = {
+                "width": 2,
+                "height": 1,
+                "bit_depth": 8,
+                "color_type": 6,
+                "supported": True,
+                "color_min": 0,
+                "color_max": 255,
+                "color_range": 255,
+                "color_mean": 128,
+                "likely_blank": False,
+                "reason": "visible image variation",
+            }
+            stdout = io.StringIO()
+            with mock.patch("rips_ai.cli.capture_screenshot", side_effect=fake_capture):
+                with mock.patch("rips_ai.cli.describe_png_frame", return_value=frame):
+                    with contextlib.redirect_stdout(stdout):
+                        result = main(
+                            [
+                                "device-capture",
+                                "--output",
+                                str(output_path),
+                                "--describe-frame",
+                            ]
+                        )
+
+        self.assertEqual(result, 0)
+        text = stdout.getvalue()
+        self.assertIn(f"screenshot: {output_path}", text)
+        self.assertIn("frame blank: no", text)
+        self.assertIn("frame reason: visible image variation", text)
+
+    def test_device_capture_fail_on_blank_returns_nonzero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "screen.png"
+
+            def fake_capture(path, remote_path):
+                path.write_bytes(b"png")
+                return path
+
+            frame = {
+                "width": 1,
+                "height": 1,
+                "bit_depth": 8,
+                "color_type": 6,
+                "supported": True,
+                "color_min": 0,
+                "color_max": 0,
+                "color_range": 0,
+                "color_mean": 0,
+                "likely_blank": True,
+                "reason": "blank dark frame",
+            }
+            stdout = io.StringIO()
+            with mock.patch("rips_ai.cli.capture_screenshot", side_effect=fake_capture):
+                with mock.patch("rips_ai.cli.describe_png_frame", return_value=frame):
+                    with contextlib.redirect_stdout(stdout):
+                        result = main(
+                            [
+                                "device-capture",
+                                "--output",
+                                str(output_path),
+                                "--fail-on-blank",
+                            ]
+                        )
+
+        self.assertEqual(result, 2)
+        text = stdout.getvalue()
+        self.assertIn("frame blank: yes", text)
+        self.assertIn("reason: captured screenshot appears blank", text)
+
+    def test_device_advise_skips_blank_screenshot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "screen.png"
+
+            def fake_capture(path, remote_path):
+                path.write_bytes(b"png")
+                return path
+
+            frame = {
+                "width": 1,
+                "height": 1,
+                "bit_depth": 8,
+                "color_type": 6,
+                "supported": True,
+                "color_min": 0,
+                "color_max": 0,
+                "color_range": 0,
+                "color_mean": 0,
+                "likely_blank": True,
+                "reason": "blank dark frame",
+            }
+            stdout = io.StringIO()
+            with mock.patch("rips_ai.cli.capture_screenshot", side_effect=fake_capture):
+                with mock.patch("rips_ai.cli.describe_png_frame", return_value=frame):
+                    with mock.patch("rips_ai.cli.command_advise_screen") as advise:
+                        with contextlib.redirect_stdout(stdout):
+                            result = main(
+                                [
+                                    "device-advise",
+                                    "--output",
+                                    str(output_path),
+                                    "--state",
+                                    "result",
+                                    "--pack-price",
+                                    "1.00",
+                                ]
+                            )
+
+        self.assertEqual(result, 2)
+        advise.assert_not_called()
+        self.assertIn("skipping OCR advice", stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

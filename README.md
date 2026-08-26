@@ -220,8 +220,16 @@ Capture the live Android screen through Shizuku when available:
 
 ```bash
 python -m rips_ai device-capture
+python -m rips_ai device-capture --describe-frame
+python -m rips_ai device-capture --fail-on-blank
 python -m rips_ai device-advise --state result --pack-price 1.00
 ```
+
+`--describe-frame` reports PNG size, brightness range, and whether Android
+returned a blank/flat frame. `--fail-on-blank` is useful for evidence scripts:
+it returns nonzero after a valid but unusable screenshot, such as a black frame
+from doze/keyguard/protected rendering. `device-advise` also checks for blank
+frames before running OCR, so bad screenshots do not produce misleading advice.
 
 Open one live pack through the calibrated Shizuku gesture flow only when the
 main buy screen is visible:
@@ -317,6 +325,9 @@ documented, and safe to resume.
    the primary control loop. Capture PNG evidence only for ambiguous fast
    states, failures, risky transitions, and OCR-only values such as result
    cards, buyback offers, bank chips, and vault appraisals.
+   Status: started in the evidence layer. Screenshot readback now uses an
+   indexed Shizuku transfer with chunk repair and sequential fallback, and
+   `device-capture --describe-frame` can diagnose blank/flat frames.
 
 4. Add verified state checks before gestures.
    The program should distinguish the main pack carousel, `What's inside`,

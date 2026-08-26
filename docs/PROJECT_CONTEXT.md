@@ -230,6 +230,7 @@ Try live Android capture through Shizuku:
 
 ```bash
 python -m rips_ai device-capture --output data/latest_screen.png
+python -m rips_ai device-capture --output data/latest_screen.png --describe-frame
 python -m rips_ai classify-screen data/latest_screen.png
 ```
 
@@ -247,7 +248,17 @@ Optional tools:
 
 Shizuku shell access has worked intermittently from this environment. The command `shizuku id` returned Android shell access at one point, but later Shizuku reported `Server is not running`.
 
-The `device-capture` path was updated to avoid corrupting binary PNG output through the Shizuku wrapper by reading remote screenshots as indexed base64 chunks. If live capture fails, first confirm:
+Latest Step 3 probe on 2026-08-26: `shizuku id` returned Android shell
+(`uid=2000(shell)`), and `device-capture --describe-frame --fail-on-blank`
+saved `data/step3_capture_probe.png` as a valid 1080x2340 PNG with visible
+image variation, not a blank frame.
+
+The `device-capture` path avoids corrupting binary PNG output through the
+Shizuku wrapper by reading remote screenshots as indexed base64 chunks with
+missing-chunk repair, then falling back to sequential chunk readback. It also
+supports `--describe-frame` and `--fail-on-blank` so a valid but black/flat PNG
+is reported as an Android display/keyguard/protected-rendering issue instead
+of an OCR problem. If live capture fails, first confirm:
 
 ```bash
 shizuku id
@@ -270,6 +281,8 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
    reliable, but it should not drive every live step. Capture PNGs for failure
    diagnosis, risky transitions, and OCR-only values such as card, bank,
    buyback, and vault appraisal amounts.
+   Status: started. `rips_ai/evidence.py` now owns indexed screenshot transfer,
+   sequential fallback, PNG validation, and blank-frame diagnostics.
 4. Add verified state checks before gestures. The assistant must distinguish
    the main pack carousel, `What's inside`, post-buy picker, slice screen,
    reveal/result, buyback sheet, vault gallery, and appraisal/detail sheet
