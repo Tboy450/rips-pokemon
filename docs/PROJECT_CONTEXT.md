@@ -287,6 +287,29 @@ If that fails, open the Shizuku app and restart the service. Also keep Codex and
    each app state, test classification and next allowed actions, then grow
    `data/outcomes.jsonl` into an observed pack config.
 
+## Step 2 Modularization Plan
+
+Do this as a refactor-only pass before adding another large live automation
+feature. Keep command names, flags, and current output stable while moving code.
+
+1. Move Android probing into `rips_ai/android_state.py`: Shizuku foreground
+   checks, wake/keyguard checks, UI dump parsing, and compact state labels.
+2. Move screenshot/evidence handling into `rips_ai/evidence.py`: capture,
+   PNG validation, blank-frame detection, OCR evidence files, and manifests.
+3. Move open-flow mechanics into `rips_ai/open_flow.py`: gestures, coordinate
+   overrides, staged sequences, fast-controller script generation, checkpoints,
+   and controller output parsing.
+4. Keep tracker mutation in the existing session/ledger/vault modules. Android
+   flow code should report observations; session code should decide what can be
+   committed.
+5. Thin `rips_ai/cli.py` so it parses arguments, calls modules, formats output,
+   and returns exit codes.
+6. Migrate one command path at a time: `device-open-pack --dry-run`, staged
+   `tap-buy`, staged `finish-open`, then the Shizuku fast controller.
+7. Test the boundaries after each move. Mock Shizuku only at the Android
+   boundary and keep CLI tests focused on user-visible output plus session
+   mutation.
+
 ## Safety Direction
 
 Keep purchase decisions manual. The program may advise and track, but it should not independently spend money. Any later automation should require explicit user confirmation before a buy, sell, vault, or buyback accept action.

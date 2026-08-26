@@ -345,6 +345,53 @@ documented, and safe to resume.
    classification and next allowed actions, then grow `data/outcomes.jsonl`
    into an observed pack config for simulation and strategy tuning.
 
+## Step 2 Refactor Plan
+
+The refactor should happen before adding much more live automation. Keep the
+CLI commands stable, move behavior behind smaller modules, and test each move
+before changing behavior.
+
+1. Create an Android state module.
+   Move Shizuku foreground checks, wake/keyguard checks, UI dump parsing, and
+   compact state labels into `rips_ai/android_state.py`. This module should not
+   know about pack economics or session mutation.
+
+2. Create an evidence module.
+   Move screenshot capture, PNG validation, blank-frame detection, OCR evidence
+   files, and run manifests into `rips_ai/evidence.py`. The fast controller can
+   call this only when it needs proof or OCR input.
+
+3. Create a pack-opening flow module.
+   Move gesture loading, coordinate overrides, staged commands, fast-controller
+   script generation, checkpoint names, and parser output into
+   `rips_ai/open_flow.py`. This module should return planned actions and
+   observed states, not print user-facing text.
+
+4. Keep session decisions in the session layer.
+   Leave bank, pending pack, vault, ledger, and reconciliation mutations in
+   `rips_ai/session.py`, `rips_ai/ledger.py`, and `rips_ai/vault.py`. The opener
+   should ask these modules what can be committed instead of editing tracker
+   state directly.
+
+5. Thin the CLI.
+   `rips_ai/cli.py` should parse arguments, call the smaller modules, format
+   output, and return exit codes. It should stop containing long Android shell
+   builders or multi-stage business logic.
+
+6. Migrate one command path at a time.
+   Start with `device-open-pack --dry-run`, then staged `tap-buy`, then
+   `finish-open`, then the fast controller. After each move, run the existing
+   CLI tests before changing the next path.
+
+7. Add boundaries to tests.
+   Unit-test module functions without Shizuku, mock Shizuku only at the Android
+   boundary, and keep CLI tests focused on command output plus session mutation.
+
+8. Acceptance criteria.
+   The refactor is done when existing command output stays compatible, the test
+   suite passes, `cli.py` no longer owns Android control details, and adding a
+   new app state does not require editing unrelated session or ledger code.
+
 ## Important Assumption
 
 `config/packs.example.json` is fake demo data. Replace it with observed outcomes before using the recommendation output as anything more than a test.
