@@ -138,6 +138,42 @@ def open_pack_sequence(
     return "; ".join(commands)
 
 
+def open_pack_dry_run_lines(
+    *,
+    stage: str,
+    pack_name: str,
+    pack_id: str,
+    price: str,
+    tracked_bank_before: str,
+    planned_bank_after_buy: str,
+    planned_pending: str,
+    command: str,
+    confirmed_buy_screen: bool,
+    purchase_observed: bool,
+) -> list[str]:
+    lines = [
+        "dry-run: device-open-pack",
+        f"stage: {stage}",
+        f"pack: {pack_name} ({pack_id})",
+        f"price: {price}",
+        f"tracked bank before: {tracked_bank_before}",
+        f"planned bank after buy: {planned_bank_after_buy}",
+        f"planned pending: {planned_pending}",
+        "session mutation: none during dry run",
+    ]
+    if purchase_observed:
+        lines.append("purchase observation: tracker would be allowed to mark pending")
+    else:
+        lines.append("purchase observation: not supplied; execution would not mutate tracker")
+    if confirmed_buy_screen:
+        lines.append("screen confirmation: main buy screen confirmed")
+    else:
+        lines.append("screen confirmation: execution still requires --confirmed-buy-screen")
+    lines.append("shizuku sequence:")
+    lines.extend(f"  {step}" for step in command.split("; "))
+    return lines
+
+
 def gallery_plan_parameters(
     flow: dict[str, object],
     *,

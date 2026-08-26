@@ -34,6 +34,7 @@ from .open_flow import (
     gallery_plan_parameters as _gallery_plan_parameters,
     gallery_shell_plan_lines as _gallery_shell_plan_lines,
     load_flow as _load_flow,
+    open_pack_dry_run_lines as _open_pack_dry_run_lines,
     open_pack_sequence as _open_pack_sequence,
     parse_point_override as _parse_point_override,
     tap_command as _tap_command,
@@ -1868,25 +1869,20 @@ def _print_open_pack_dry_run(
     purchase_observed: bool,
     stage: str,
 ) -> None:
-    print("dry-run: device-open-pack")
-    print(f"stage: {stage}")
-    print(f"pack: {pack.name} ({pack.id})")
-    print(f"price: {cents_to_dollars(pack.price_cents)}")
-    print(f"tracked bank before: {cents_to_dollars(session.bank_cents)}")
-    print(f"planned bank after buy: {cents_to_dollars(session.bank_cents - pack.price_cents)}")
-    print(f"planned pending: {pack.id} at {cents_to_dollars(pack.price_cents)}")
-    print("session mutation: none during dry run")
-    if purchase_observed:
-        print("purchase observation: tracker would be allowed to mark pending")
-    else:
-        print("purchase observation: not supplied; execution would not mutate tracker")
-    if confirmed_buy_screen:
-        print("screen confirmation: main buy screen confirmed")
-    else:
-        print("screen confirmation: execution still requires --confirmed-buy-screen")
-    print("shizuku sequence:")
-    for step in command.split("; "):
-        print(f"  {step}")
+    lines = _open_pack_dry_run_lines(
+        stage=stage,
+        pack_name=pack.name,
+        pack_id=pack.id,
+        price=cents_to_dollars(pack.price_cents),
+        tracked_bank_before=cents_to_dollars(session.bank_cents),
+        planned_bank_after_buy=cents_to_dollars(session.bank_cents - pack.price_cents),
+        planned_pending=f"{pack.id} at {cents_to_dollars(pack.price_cents)}",
+        command=command,
+        confirmed_buy_screen=confirmed_buy_screen,
+        purchase_observed=purchase_observed,
+    )
+    for line in lines:
+        print(line)
 
 
 def _print_gallery_shell_plan(

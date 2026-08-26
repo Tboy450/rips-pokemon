@@ -9,6 +9,7 @@ from rips_ai.android_state import (
 from rips_ai.open_flow import (
     gallery_shell_plan_lines,
     gallery_plan_parameters,
+    open_pack_dry_run_lines,
     open_pack_sequence,
     parse_point_override,
 )
@@ -122,6 +123,30 @@ class OpenFlowTests(unittest.TestCase):
 
         self.assertIn("input tap 540 1990", command)
         self.assertNotIn("monkey -p codex.app", command)
+
+    def test_open_pack_dry_run_lines_format_command_steps(self):
+        lines = open_pack_dry_run_lines(
+            stage="full",
+            pack_name="$1 pack",
+            pack_id="one_dollar",
+            price="$1.00",
+            tracked_bank_before="$14.00",
+            planned_bank_after_buy="$13.00",
+            planned_pending="one_dollar at $1.00",
+            command=(
+                "am start -n com.triumpharcade.tcg/.MainActivity >/dev/null; "
+                "input tap 540 1950"
+            ),
+            confirmed_buy_screen=False,
+            purchase_observed=False,
+        )
+
+        self.assertEqual(lines[0], "dry-run: device-open-pack")
+        self.assertIn(
+            "screen confirmation: execution still requires --confirmed-buy-screen",
+            lines,
+        )
+        self.assertIn("  input tap 540 1950", lines)
 
     def test_gallery_plan_parameters_uses_flow_defaults(self):
         parameters, points, scroll_command = gallery_plan_parameters(sample_flow())
